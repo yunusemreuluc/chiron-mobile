@@ -34,7 +34,7 @@ PC olmadan da asistanın telefon işleri çalışır.
 
 ## Notlar
 
-- **Lisanslar:** `assets/wake/melspectrogram.onnx` ve `embedding_model.onnx`
+- **Lisanslar:** Kod MIT (`LICENSE`). `assets/wake/melspectrogram.onnx` ve `embedding_model.onnx`
   [openWakeWord](https://github.com/dscripka/openWakeWord)'den alındı; o projenin hazır modelleri
   [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/) lisanslı (gömme modeli
   Google'ın Apache 2.0 lisanslı speech_embedding'inin yeniden uygulaması). `airon.onnx` openWakeWord
