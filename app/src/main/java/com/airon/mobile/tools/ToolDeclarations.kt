@@ -1,0 +1,169 @@
+package com.airon.mobile.tools
+
+import org.json.JSONArray
+import org.json.JSONObject
+
+/**
+ * Telefondaki Aıron'un araçları — kullanıcının 2026-09-15'te verdiği listeyle
+ * birebir aynı adlar. Şema Gemini'nin OpenAPI alt kümesi (tip adları BÜYÜK harf).
+ */
+object ToolDeclarations {
+
+    val all: JSONArray by lazy {
+        JSONArray()
+            .put(
+                fn(
+                    "call_contact",
+                    "Rehberdeki bir kişiyi telefonla hemen arar.",
+                    props(
+                        "name" to str(
+                            "Kişinin rehberdeki adının EKSİZ yalın hâli. 'Annemi ara' → 'Annem', " +
+                                "'Ahmet'i ara' → 'Ahmet', 'Mehmet abiyi ara' → 'Mehmet abi'.",
+                        ),
+                        "contact_id" to str("Yalnızca araç daha önce needs_choice döndürdüyse: kullanıcının seçtiği adayın contact_id'si."),
+                    ),
+                    required = listOf("name"),
+                ),
+            )
+            .put(
+                fn(
+                    "send_message",
+                    "Rehberdeki bir kişiye mesaj yazıp gönderir. Varsayılan kanal WhatsApp; kullanıcı SMS derse sms.",
+                    props(
+                        "recipient" to str("Alıcının rehberdeki adının EKSİZ yalın hâli ('Ahmet'e yaz' → 'Ahmet')."),
+                        "message" to str("Gönderilecek metnin kendisi, kullanıcının söylediği gibi; başına açıklama ekleme."),
+                        "channel" to enumStr("Kanal.", "whatsapp", "sms"),
+                        "contact_id" to str("Yalnızca araç daha önce needs_choice döndürdüyse: kullanıcının seçtiği adayın contact_id'si."),
+                    ),
+                    required = listOf("recipient", "message"),
+                ),
+            )
+            .put(
+                fn(
+                    "control_device",
+                    "Uygulama açma, uygulama içinde arama, YouTube'da video/şarkı oynatma, alarm kurma, " +
+                        "zamanlayıcı başlatma, feneri açma/kapama.",
+                    props(
+                        "action" to enumStr(
+                            "Yapılacak iş. 'YouTube'da X aç/çal/oynat' → play_youtube (ilk videoyu başlatır). " +
+                                "'X uygulamasında Y ara' → search_in_app. Yalnızca uygulamayı açmak → open_app.",
+                            "open_app", "search_in_app", "play_youtube", "set_alarm", "set_timer", "flashlight_on", "flashlight_off",
+                        ),
+                        "app_name" to str("open_app ve search_in_app için uygulamanın adı (ör. 'Spotify', 'YouTube', 'Chrome')."),
+                        "query" to str("search_in_app ve play_youtube için aranacak/oynatılacak şey, kullanıcının söylediği gibi (ör. 'bas gaza')."),
+                        "hour" to int("set_alarm için saat (0-23)."),
+                        "minute" to int("set_alarm için dakika (0-59)."),
+                        "duration_seconds" to int("set_timer için toplam süre, saniye."),
+                        "label" to str("Alarm ya da zamanlayıcının etiketi (isteğe bağlı)."),
+                    ),
+                    required = listOf("action"),
+                ),
+            )
+            .put(
+                fn(
+                    "manage_device_audio",
+                    "Ses seviyesi, medya kontrolü (oynat/duraklat/sonraki/önceki) ve rahatsız etme modu.",
+                    props(
+                        "action" to enumStr(
+                            "Yapılacak iş.",
+                            "volume_up", "volume_down", "set_volume", "mute", "unmute",
+                            "media_play_pause", "media_next", "media_previous", "dnd_on", "dnd_off",
+                        ),
+                        "level" to int("set_volume için medya ses seviyesi yüzdesi (0-100)."),
+                    ),
+                    required = listOf("action"),
+                ),
+            )
+            .put(
+                fn(
+                    "get_recent_notifications",
+                    "Telefondaki son bildirimleri okur. Belirli bir uygulamanın mesajları sorulursa app_name ver.",
+                    props(
+                        "app_name" to str("Süzülecek uygulama (ör. 'WhatsApp', 'Instagram'). Boşsa hepsi."),
+                        "limit" to int("En fazla kaç bildirim (varsayılan 8)."),
+                    ),
+                ),
+            )
+            .put(
+                fn(
+                    "get_device_health",
+                    "Telefonun şarj yüzdesi, şarj olup olmadığı, tahmini kalan süre ve internet/Wi-Fi bağlantı durumu.",
+                    JSONObject(),
+                ),
+            )
+            .put(
+                fn(
+                    "query_desktop_airon",
+                    "Bilgisayardaki Aıron'a soru sorar; o PC ekranına, sistemine, açık uygulamalara bakıp cevap verir. " +
+                        "'PC'de ne durumdayım', 'bilgisayarda ne açık', 'indirme bitti mi' gibi her PC sorusu için.",
+                    props("question" to str("PC'deki Aıron'a iletilecek soru, tam cümle.")),
+                    required = listOf("question"),
+                ),
+            )
+            .put(
+                fn(
+                    "send_desktop_command",
+                    "Bilgisayara doğrudan komut: kilitle, uykuya al, PC'deki medyayı oynat/duraklat/geç, metni PC panosuna gönder.",
+                    props(
+                        "action" to enumStr("Komut.", "lock", "sleep", "media_play_pause", "media_next", "media_previous", "clipboard"),
+                        "text" to str("clipboard için PC panosuna aktarılacak metin."),
+                    ),
+                    required = listOf("action"),
+                ),
+            )
+            .put(
+                fn(
+                    "start_navigation",
+                    "Google Haritalar'da yol tarifini/navigasyonu doğrudan başlatır ('eve götür', 'Kadıköy'e yol tarifi', 'en yakın benzinlik').",
+                    props(
+                        "destination" to str(
+                            "Varış yeri, kullanıcının söylediği gibi (adres, yer adı ya da 'en yakın benzinlik'). " +
+                                "Ev için tam olarak 'ev', iş için 'iş' yaz.",
+                        ),
+                        "mode" to enumStr("Ulaşım türü; belirtilmezse driving.", "driving", "walking", "bicycling", "two_wheeler"),
+                    ),
+                    required = listOf("destination"),
+                ),
+            )
+            .put(
+                fn(
+                    "add_feature_request",
+                    "Aıron'un şu an YAPAMADIĞI bir şeyi kullanıcının istek listesine ekler (PC'deki Aıron kasasına gider). " +
+                        "YALNIZCA kullanıcı eklemeyi onayladıktan sonra ya da 'istek listesine ekle' dediğinde çağır.",
+                    props(
+                        "title" to str("İsteğin kısa, genel başlığı; kişi adı/mesaj içeriği OLMADAN (ör. 'Spotify'da çalma listesi başlatma')."),
+                        "user_request" to str("Kullanıcının o anki isteği, kısaca; kişisel içerik (mesaj metni, numara) yazma."),
+                        "attempted" to str("Denediğin araç ve neden olmadığı (ör. 'control_device search_in_app — liste açılamadı'); hiç araç yoksa 'uygun araç yok'."),
+                    ),
+                    required = listOf("title"),
+                ),
+            )
+            .put(
+                fn(
+                    "save_quick_note",
+                    "Hızlı not alır ('bunu not et', 'aklıma geldi yaz'). Telefona kaydeder, PC'ye ulaşılabiliyorsa oraya da yazar.",
+                    props("text" to str("Notun metni.")),
+                    required = listOf("text"),
+                ),
+            )
+    }
+
+    private fun fn(name: String, description: String, parameters: JSONObject, required: List<String> = emptyList()): JSONObject {
+        val decl = JSONObject().put("name", name).put("description", description)
+        if (parameters.length() > 0) {
+            val schema = JSONObject().put("type", "OBJECT").put("properties", parameters)
+            if (required.isNotEmpty()) schema.put("required", JSONArray(required))
+            decl.put("parameters", schema)
+        }
+        return decl
+    }
+
+    private fun props(vararg entries: Pair<String, JSONObject>) = JSONObject().apply {
+        entries.forEach { (key, value) -> put(key, value) }
+    }
+
+    private fun str(description: String) = JSONObject().put("type", "STRING").put("description", description)
+    private fun int(description: String) = JSONObject().put("type", "INTEGER").put("description", description)
+    private fun enumStr(description: String, vararg values: String) =
+        str(description).put("enum", JSONArray(values.toList()))
+}
