@@ -18,11 +18,13 @@ import androidx.core.content.ContextCompat
 import com.airon.mobile.AppSettings
 import com.airon.mobile.BuildConfig
 import com.airon.mobile.audio.AudioIO
+import com.airon.mobile.audio.CarAudio
 import com.airon.mobile.live.GeminiLiveClient
 import com.airon.mobile.live.SystemPrompt
 import com.airon.mobile.service.AssistantBus.Phase
 import com.airon.mobile.tools.ToolDeclarations
 import com.airon.mobile.tools.MessageAnnouncer
+import com.airon.mobile.tools.MessageDrafts
 import com.airon.mobile.tools.ToolExecutor
 import com.airon.mobile.ui.MainActivity
 import com.airon.mobile.wake.WakeWordListener
@@ -71,7 +73,11 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
     /** Söylenmesi için gönderilen "yapıldı" numaraları — cevap turu bitince onaylanır. */
     private val awaitingAck = ArrayList<String>()
     private val announcer: (MessageAnnouncer.Message) -> Unit = { m -> main.post { onIncomingMessage(m) } }
-    private val idleStop = Runnable { stopSession("Uzun süre konuşulmadı, oturum kapandı.") }
+    private val idleStop = Runnable {
+        // Uzun bir okuma sürerken (kuyrukta ses var) boşta sayılmaz; kısa Bluetooth
+        // süresi cümlenin ortasında kesmesin (Astra incelemesi).
+        if (audio?.isSpeaking == true) touch() else stopSession("Uzun süre konuşulmadı, oturum kapandı.")
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -230,6 +236,7 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         turnsThisSession = 0
         live?.close()
         live = null
+        MessageDrafts.clear() // onaylanmamış mesaj taslağı oturumla birlikte düşer
         audio?.stop()
         audio = null
         wake?.stop()
@@ -254,7 +261,10 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         main.removeCallbacks(idleStop)
         // Bir araç (ör. 90 sn'lik PC sorusu) hâlâ çalışıyorsa boşta sayılmaz.
         if (runningTools.get() > 0 || live == null) return
-        main.postDelayed(idleStop, IDLE_TIMEOUT_MS)
+        // Bluetooth'ta oturum sürdükçe müzik kısık (ya da araba görüşme kaynağında) kalıyor:
+        // 45 sn orada çok uzun.
+        val bluetooth = audio?.path?.let { it != CarAudio.Route.PHONE } == true
+        main.postDelayed(idleStop, if (bluetooth) BT_IDLE_TIMEOUT_MS else IDLE_TIMEOUT_MS)
     }
 
     // ── GeminiLiveClient.Listener (OkHttp iş parçacığı) ─────────────────────
@@ -412,6 +422,7 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         private const val NOTIFICATION_ID = 7
         private const val ACTION_STOP = "com.airon.mobile.STOP"
         private const val IDLE_TIMEOUT_MS = 45_000L
+        private const val BT_IDLE_TIMEOUT_MS = 15_000L
         private const val ACTION_WAKE_ON = "com.airon.mobile.WAKE_ON"
         private const val ACTION_WAKE_OFF = "com.airon.mobile.WAKE_OFF"
         private const val MIC_RELEASE_MS = 400L

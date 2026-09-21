@@ -59,6 +59,15 @@ class AppSettings(context: Context) {
         get() = prefs.getBoolean(KEY_CAR_MODE, false)
         set(value) = prefs.edit().putBoolean(KEY_CAR_MODE, value).apply()
 
+    /**
+     * Bluetooth'ta telefon hattı (SCO, arabanın mikrofonu). Kapalıyken (varsayılan) Aıron'un
+     * sesi müzik hattından gider, mikrofon telefonun kendisi — araba "görüşme" kaynağına
+     * geçmiyor. Toyota C-HR hattan sonra müziğe dönmüyordu (audio/CarAudio.kt).
+     */
+    var handsFreeCall: Boolean
+        get() = prefs.getBoolean(KEY_HANDS_FREE_CALL, false)
+        set(value) = prefs.edit().putBoolean(KEY_HANDS_FREE_CALL, value).apply()
+
     /** "Eve götür" / "işe götür" için. */
     var homeAddress: String
         get() = prefs.getString(KEY_HOME, "") ?: ""
@@ -96,6 +105,7 @@ class AppSettings(context: Context) {
         private const val KEY_WAKE = "wake_enabled"
         private const val KEY_VOICE_VOLUME = "voice_volume"
         private const val KEY_CAR_MODE = "car_mode"
+        private const val KEY_HANDS_FREE_CALL = "hands_free_call"
         private const val KEY_HOME = "home_address"
         private const val KEY_WORK = "work_address"
         private const val KEY_WAKE_PAUSED = "wake_paused_for_recording"

@@ -23,6 +23,16 @@ import android.view.accessibility.AccessibilityNodeInfo
  */
 class WhatsAppSendService : AccessibilityService() {
 
+    override fun onServiceConnected() {
+        super.onServiceConnected()
+        connected = this
+    }
+
+    override fun onDestroy() {
+        if (connected === this) connected = null
+        super.onDestroy()
+    }
+
     override fun onInterrupt() = Unit
 
     override fun onAccessibilityEvent(event: AccessibilityEvent) {
@@ -89,6 +99,20 @@ class WhatsAppSendService : AccessibilityService() {
 
         @Volatile private var pending: Pending? = null
         @Volatile private var sentToken = 0L
+        @Volatile private var connected: WhatsAppSendService? = null
+
+        /**
+         * Ana ekrana döner (istek İ-001). Global eylem, servis bağlıyken arka plan
+         * açılış kısıtından ve MIUI kapısından bağımsız çalışıyor; pencere içeriğine
+         * dokunmadığı için servisin WhatsApp sınırını da genişletmiyor.
+         * Servis bağlı değilse false döner, çağıran niyet yoluna düşer.
+         */
+        fun goHome(): Boolean {
+            val service = connected ?: return false
+            return runCatching {
+                service.performGlobalAction(GLOBAL_ACTION_HOME)
+            }.getOrDefault(false)
+        }
 
         /** Silahlandırır; dönen belirteçle `awaitSent` gönderimin gerçekten olup olmadığını bekler. */
         fun arm(message: String, contactName: String, contactId: String): Long {

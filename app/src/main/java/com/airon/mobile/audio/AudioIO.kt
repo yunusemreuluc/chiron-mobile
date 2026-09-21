@@ -31,7 +31,7 @@ class AudioIO(
     private val onMicFrame: (ByteArray, Int) -> Unit,
     private val onMicLevel: (Float) -> Unit,
 ) {
-    private val route = CarAudio(context)
+    private val route = CarAudio.get(context)
     private val playQueue = LinkedBlockingQueue<ByteArray>()
     @Volatile private var running = false
     @Volatile private var lastPlaybackAt = 0L
@@ -43,16 +43,28 @@ class AudioIO(
         private set
     private var record: AudioRecord? = null
     private var track: AudioTrack? = null
+    private var micThread: Thread? = null
+    private var speakerThread: Thread? = null
+    private var routeToken = 0
+    @Volatile private var echoTailMs = ECHO_TAIL_MS
+
+    /** Bu oturumun ses yolu; bekleme süresi buna göre (AssistantService). */
+    @Volatile var path = CarAudio.Route.PHONE
+        private set
 
     val isSpeaking: Boolean
-        get() = writing || playQueue.isNotEmpty() || SystemClock.elapsedRealtime() - lastPlaybackAt < ECHO_TAIL_MS
+        get() = writing || playQueue.isNotEmpty() || SystemClock.elapsedRealtime() - lastPlaybackAt < echoTailMs
 
     @SuppressLint("MissingPermission") // izin, servis başlamadan önce MainActivity'de alınıyor
     fun start() {
         if (running) return
         running = true
-        // Araba/kulaklık bağlıysa konuşma oraya (mikrofon dahil); müzik kısılır.
-        val handsFree = route.acquire()
+        // Bluetooth bağlıysa ses oraya (varsayılan medya akışı, mikrofon telefonda); müzik kısılır.
+        val (chosen, token) = route.acquire()
+        path = chosen
+        routeToken = token
+        // A2DP gecikmesi (~200 ms) + araba kabininin yankısı telefon mikrofonuna dönüyor.
+        echoTailMs = if (chosen == CarAudio.Route.BT_MEDIA) BT_ECHO_TAIL_MS else ECHO_TAIL_MS
 
         val minIn = AudioRecord.getMinBufferSize(IN_RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
         val rec = AudioRecord(
@@ -70,7 +82,10 @@ class AudioIO(
             .setAudioAttributes(
                 AudioAttributes.Builder()
                     // Bluetooth eller serbest (SCO) hattı yalnız "görüşme" sesini taşıyor.
-                    .setUsage(if (handsFree) AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_ASSISTANT)
+                    .setUsage(
+                        if (chosen == CarAudio.Route.HANDS_FREE) AudioAttributes.USAGE_VOICE_COMMUNICATION
+                        else AudioAttributes.USAGE_ASSISTANT,
+                    )
                     .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                     .build(),
             )
@@ -88,7 +103,7 @@ class AudioIO(
             .build()
         track = out
 
-        thread(name = "airon-mic") {
+        micThread = thread(name = "airon-mic") {
             val buffer = ByteArray(FRAME_BYTES)
             try {
                 rec.startRecording()
@@ -100,7 +115,10 @@ class AudioIO(
                         continue
                     }
                     val lvl = level(buffer, read)
-                    if (lvl >= VOICE_LEVEL) lastVoiceAt = SystemClock.elapsedRealtime()
+                    if (lvl >= VOICE_LEVEL) {
+                        lastVoiceAt = SystemClock.elapsedRealtime()
+                        lastUserVoiceAt = lastVoiceAt
+                    }
                     onMicLevel(lvl)
                     onMicFrame(buffer, read)
                 }
@@ -112,7 +130,7 @@ class AudioIO(
             }
         }
 
-        thread(name = "airon-speaker") {
+        speakerThread = thread(name = "airon-speaker") {
             try {
                 out.play()
                 var applied = -1f
@@ -162,10 +180,29 @@ class AudioIO(
 
     fun stop() {
         running = false
-        route.release()
         playQueue.clear()
+        val rec = record
+        val out = track
         record = null
         track = null
+        val workers = listOfNotNull(micThread, speakerThread)
+        micThread = null
+        speakerThread = null
+        val token = routeToken
+        // Hat, kayıt ve çalma GERÇEKTEN kapandıktan sonra bırakılıyor: iş parçacıkları
+        // AudioRecord/AudioTrack'i bir sonraki döngüde serbest bırakıyor, açık bir
+        // görüşme kaydı dururken SCO temizlenirse Android hattı ayakta tutuyordu.
+        thread(name = "airon-route-release") {
+            // Bloklayan read()/write() bunlarla hemen dönüyor; release'i iş parçacıkları
+            // kendi finally'lerinde yapıyor — burada release ETME, çifte release çökertir.
+            runCatching { rec?.stop() }
+            runCatching { out?.pause() }
+            workers.forEach {
+                runCatching { it.join(WORKER_JOIN_MS) }
+                if (it.isAlive) Log.w(TAG, "${it.name} kapanmadı; ses yolu yine de bırakılıyor")
+            }
+            route.release(token)
+        }
     }
 
     private fun level(buffer: ByteArray, length: Int): Float {
@@ -182,6 +219,13 @@ class AudioIO(
     companion object {
         /** Aıron'un sesi (0..1). AppSettings.voiceVolume'dan besleniyor. */
         @Volatile var volume = 0.6f
+
+        /**
+         * Kullanıcının sesinin son duyulduğu an (elapsedRealtime), oturumdan bağımsız.
+         * Mesaj taslağının onayını doğrulamak için (ContactTools). Aıron konuşurken
+         * mikrofon kapalı olduğundan bu an yalnız kullanıcı gerçekten konuştuğunda ilerler.
+         */
+        @Volatile var lastUserVoiceAt = 0L
 
         /** Ayarlar'daki "Dene": konuşmayla aynı akışta (asistan sesi) kısa bir ton. */
         fun preview(vol: Float) {
@@ -234,6 +278,9 @@ class AudioIO(
         // write() tamponu doldurunca dönüyor, ses o anda henüz çalınmadı: kuyruk
         // AudioTrack tamponu (~2× minimum, yaklaşık 200 ms) + oda yankısını kapsamalı.
         private const val ECHO_TAIL_MS = 500L
+        private const val BT_ECHO_TAIL_MS = 900L
+        /** Mikrofon karesi 100 ms, hoparlör kuyruğu 200 ms bekliyor; bunun üstü takılma. */
+        private const val WORKER_JOIN_MS = 1_000L
         /** Tepe seviye bunun üstündeyse konuşma sayılıyor (gürültü bastırıcı sessizliği sıfırlıyor). */
         private const val VOICE_LEVEL = 0.04f
     }

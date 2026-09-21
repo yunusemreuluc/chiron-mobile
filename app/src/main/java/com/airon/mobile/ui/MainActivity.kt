@@ -369,6 +369,7 @@ private fun SettingsPanel(onClose: () -> Unit, onRecorder: () -> Unit) {
     var volume by remember { mutableFloatStateOf(settings.voiceVolume) }
     var voice by remember { mutableStateOf(settings.voice) }
     var carMode by remember { mutableStateOf(settings.carMode) }
+    var handsFreeCall by remember { mutableStateOf(settings.handsFreeCall) }
     var home by remember { mutableStateOf(settings.homeAddress) }
     var work by remember { mutableStateOf(settings.workAddress) }
 
@@ -468,13 +469,29 @@ private fun SettingsPanel(onClose: () -> Unit, onRecorder: () -> Unit) {
                 Text("Araba modu", color = Color(0xF2EDF2FA), fontSize = 14.sp)
                 Text(
                     "Aıron dinlerken gelen WhatsApp/SMS mesajlarını sesli okur ve cevap vermek isteyip istemediğini sorar. " +
-                        "\"Aıron: açık\" olmalı. Bluetooth/araba bağlıysa konuşma oradan gelir.",
+                        "\"Aıron: açık\" olmalı. Bluetooth/araba bağlıysa Aıron'un sesi oradan gelir.",
                     color = Faint, fontSize = 12.sp, lineHeight = 16.sp,
                 )
             }
             Switch(
                 checked = carMode,
                 onCheckedChange = { carMode = it; settings.carMode = it },
+                colors = SwitchDefaults.colors(checkedThumbColor = CoreColors.Background, checkedTrackColor = CoreColors.Ice),
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Telefon hattı kullan", color = Color(0xF2EDF2FA), fontSize = 14.sp)
+                Text(
+                    "Kapalı (önerilen): Aıron'un sesi müzik hattından gelir, mikrofon telefonun kendisi; araba görüşme " +
+                        "moduna geçmez, konuşma bitince müzik geri açılır. Açık: arabanın mikrofonu kullanılır ama araba " +
+                        "bunu telefon görüşmesi sanar, bazı arabalar sonra müziğe dönmez.",
+                    color = Faint, fontSize = 12.sp, lineHeight = 16.sp,
+                )
+            }
+            Switch(
+                checked = handsFreeCall,
+                onCheckedChange = { handsFreeCall = it; settings.handsFreeCall = it },
                 colors = SwitchDefaults.colors(checkedThumbColor = CoreColors.Background, checkedTrackColor = CoreColors.Ice),
             )
         }

@@ -38,6 +38,7 @@ class ToolExecutor(context: Context, settings: AppSettings) {
             "save_quick_note" -> saveNote(args)
             "start_navigation" -> navigation.navigate(args)
             "add_feature_request" -> requests.add(args)
+            "list_feature_requests" -> requests.list()
             else -> fail("Bilinmeyen araç: $name")
         }
     } catch (e: Exception) {

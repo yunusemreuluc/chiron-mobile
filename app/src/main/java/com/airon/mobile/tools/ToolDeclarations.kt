@@ -28,12 +28,15 @@ object ToolDeclarations {
             .put(
                 fn(
                     "send_message",
-                    "Rehberdeki bir kişiye mesaj yazıp gönderir. Varsayılan kanal WhatsApp; kullanıcı SMS derse sms.",
+                    "Rehberdeki bir kişiye mesaj hazırlar, kullanıcı onaylayınca gönderir. İKİ AŞAMALI: draft_id olmadan " +
+                        "çağrı yalnızca taslak döner (gönderilmez); kullanıcı onaylayınca dönen draft_id ile aynı parametrelerle " +
+                        "tekrar çağır. Varsayılan kanal WhatsApp; kullanıcı SMS derse sms.",
                     props(
                         "recipient" to str("Alıcının rehberdeki adının EKSİZ yalın hâli ('Ahmet'e yaz' → 'Ahmet')."),
                         "message" to str("Gönderilecek metnin kendisi, kullanıcının söylediği gibi; başına açıklama ekleme."),
                         "channel" to enumStr("Kanal.", "whatsapp", "sms"),
                         "contact_id" to str("Yalnızca araç daha önce needs_choice döndürdüyse: kullanıcının seçtiği adayın contact_id'si."),
+                        "draft_id" to str("Yalnızca kullanıcı taslağı AÇIKÇA onayladıktan sonra: taslak aşamasında dönen draft_id. Onay yoksa verme."),
                     ),
                     required = listOf("recipient", "message"),
                 ),
@@ -42,12 +45,14 @@ object ToolDeclarations {
                 fn(
                     "control_device",
                     "Uygulama açma, uygulama içinde arama, YouTube'da video/şarkı oynatma, alarm kurma, " +
-                        "zamanlayıcı başlatma, feneri açma/kapama.",
+                        "zamanlayıcı başlatma, feneri açma/kapama, ana ekrana dönme.",
                     props(
                         "action" to enumStr(
                             "Yapılacak iş. 'YouTube'da X aç/çal/oynat' → play_youtube (ilk videoyu başlatır). " +
-                                "'X uygulamasında Y ara' → search_in_app. Yalnızca uygulamayı açmak → open_app.",
+                                "'X uygulamasında Y ara' → search_in_app. Yalnızca uygulamayı açmak → open_app. " +
+                                "'Ana ekrana dön', 'ana ekrana çık', 'buradan çık' → go_home.",
                             "open_app", "search_in_app", "play_youtube", "set_alarm", "set_timer", "flashlight_on", "flashlight_off",
+                            "go_home",
                         ),
                         "app_name" to str("open_app ve search_in_app için uygulamanın adı (ör. 'Spotify', 'YouTube', 'Chrome')."),
                         "query" to str("search_in_app ve play_youtube için aranacak/oynatılacak şey, kullanıcının söylediği gibi (ör. 'bas gaza')."),
@@ -134,8 +139,21 @@ object ToolDeclarations {
                         "title" to str("İsteğin kısa, genel başlığı; kişi adı/mesaj içeriği OLMADAN (ör. 'Spotify'da çalma listesi başlatma')."),
                         "user_request" to str("Kullanıcının o anki isteği, kısaca; kişisel içerik (mesaj metni, numara) yazma."),
                         "attempted" to str("Denediğin araç ve neden olmadığı (ör. 'control_device search_in_app — liste açılamadı'); hiç araç yoksa 'uygun araç yok'."),
+                        "detail" to str(
+                            "İsteği okuyacak geliştirici için KAPSAMLI açıklama, 2-5 cümle: kullanıcının tam olarak ne istediği, " +
+                                "hangi durumda olduğu (arabada mı, hangi uygulama açıktı, müzik çalıyor muydu), hangi aracı hangi parametreyle " +
+                                "denediğin ve dönen sonuç/hata metni, ideal davranışın ne olması gerektiği. Kısaltma, tahmin ekleme; bilmediğini yazma. " +
+                                "Kişisel içerik YAZMA: kişi adı, mesaj metni, telefon numarası, adres yerine 'bir kişi', 'bir mesaj' de.",
+                        ),
                     ),
                     required = listOf("title"),
+                ),
+            )
+            .put(
+                fn(
+                    "list_feature_requests",
+                    "Kullanıcının istek listesini okur ('istek listemde ne var', 'hangi istekler yapıldı').",
+                    JSONObject(),
                 ),
             )
             .put(

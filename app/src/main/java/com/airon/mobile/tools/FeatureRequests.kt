@@ -35,6 +35,7 @@ class FeatureRequests(context: Context, settings: AppSettings) {
             .put("title", title.take(120))
             .put("said", args.optString("user_request").trim().take(300))
             .put("attempted", args.optString("attempted").trim().take(300))
+            .put("detail", args.optString("detail").take(1200))
             .put("device", "${Build.MANUFACTURER} ${Build.MODEL}, ${BuildConfig.VERSION_NAME}")
             .put("at", SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ROOT).format(Date()))
         synchronized(LOCK) {
@@ -48,6 +49,37 @@ class FeatureRequests(context: Context, settings: AppSettings) {
         } else {
             ok("İstek telefona kaydedildi; PC'ye şu an ulaşılamadı, PC açılınca kendiliğinden gönderilecek.")
         }
+    }
+
+    /** PC'deki istek listesini ve PC'ye henüz gitmemiş yerel istek başlıklarını döner. */
+    fun list(): JSONObject {
+        try {
+            flush()
+        } catch (_: Exception) {
+            // Ağ hatasında yerel bekleyenleri yine de döndür.
+        }
+        val pendingOnPhone = synchronized(LOCK) {
+            val pending = read(file)
+            JSONArray().apply {
+                for (i in 0 until pending.length()) {
+                    val title = pending.optJSONObject(i)?.optString("title").orEmpty()
+                    if (title.isNotBlank()) put(title)
+                }
+            }
+        }
+        val response = try {
+            desktop.get("/api/remote/requests/list")
+        } catch (_: Exception) {
+            null
+        }
+        if (response == null || !response.optBoolean("success")) {
+            return ok("PC'ye ulaşılamadı; yalnız telefonda bekleyenler")
+                .put("pending_on_phone", pendingOnPhone)
+        }
+        val items = response.optJSONObject("data")?.optJSONArray("items") ?: JSONArray()
+        return ok("İstek listesi alındı.")
+            .put("items", items)
+            .put("pending_on_phone", pendingOnPhone)
     }
 
     /** Bekleyenleri PC'ye gönderir. Gönderilenlerin kimlik → numara eşlemesini döner. */

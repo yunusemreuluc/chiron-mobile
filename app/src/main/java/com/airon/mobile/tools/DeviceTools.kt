@@ -28,6 +28,7 @@ class DeviceTools(private val context: Context) {
         "set_timer" -> setTimer(args)
         "flashlight_on" -> torch(true)
         "flashlight_off" -> torch(false)
+        "go_home" -> goHome()
         else -> fail("Bilinmeyen cihaz komutu: ${args.optString("action")}")
     }
 
@@ -39,6 +40,24 @@ class DeviceTools(private val context: Context) {
         BackgroundLaunch.blockedReason(context)?.let { return fail(it) }
         context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
         return ok("${app.label} açıldı.")
+    }
+
+    /**
+     * "Ana ekrana dön" (istek İ-001). Erişilebilirlik servisi bağlıysa global eylem
+     * kullanılıyor: arka plan açılış kısıtına da MIUI kapısına da takılmıyor. Bağlı
+     * değilse ana ekran niyeti; açılış engelliyse [BackgroundLaunch] nedeni olduğu
+     * gibi dönüyor, "döndüm" denmiyor.
+     */
+    private fun goHome(): JSONObject {
+        if (WhatsAppSendService.goHome()) return ok("Ana ekrana dönüldü.")
+        BackgroundLaunch.blockedReason(context)?.let { return fail(it) }
+        val home = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_HOME)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return runCatching {
+            context.startActivity(home)
+            ok("Ana ekrana dönüldü.")
+        }.getOrElse { fail("Ana ekrana dönülemedi: ${it.message ?: it.javaClass.simpleName}") }
     }
 
     private fun searchInApp(spoken: String, query: String): JSONObject {

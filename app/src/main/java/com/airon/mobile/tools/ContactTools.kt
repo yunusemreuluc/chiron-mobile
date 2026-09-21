@@ -5,12 +5,15 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.ContactsContract
 import android.telephony.SmsManager
 import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URLEncoder
+import java.util.UUID
+import com.airon.mobile.audio.AudioIO
 import com.airon.mobile.tools.ContactMatcher.Contact
 import com.airon.mobile.tools.ContactMatcher.Resolution
 
@@ -35,10 +38,17 @@ class ContactTools(private val context: Context) {
         return ok("${contact.name} aranıyor.", "contact" to contact.name)
     }
 
+    /**
+     * İki aşamalı (istek İ-002, "göndermeden önce düzeltebileyim"): `draft_id` olmadan
+     * gelen çağrı GÖNDERMİYOR, taslak dönüyor — Aıron alıcıyı ve metni okuyup onay
+     * istiyor, kullanıcı düzeltme derse yeni metinle yeni taslak alınıyor. Gönderim
+     * yalnızca SON taslağın kimliğiyle ve taslakla birebir aynı kişi/kanal/metinle:
+     * model okunmamış ya da okunduktan sonra değişmiş bir metni gönderemiyor.
+     */
     fun sendMessage(args: JSONObject): JSONObject {
         val recipient = args.optString("recipient").trim()
         val message = args.optString("message").trim()
-        val channel = args.optString("channel", "whatsapp").ifBlank { "whatsapp" }
+        val channel = if (args.optString("channel").trim().lowercase() == "sms") "sms" else "whatsapp"
         if (message.isEmpty()) return fail("Mesaj metni boş.")
         if (!granted(Manifest.permission.READ_CONTACTS)) return fail("Rehber izni verilmemiş.")
 
@@ -48,7 +58,32 @@ class ContactTools(private val context: Context) {
             else -> return choice(recipient, match)
         }
 
+        val draftId = args.optString("draft_id").trim()
+        if (draftId.isEmpty()) return draft(contact, channel, message)
+        val approved = MessageDrafts.take(draftId)
+            ?: return fail("Bu taslak artık geçerli değil (süresi doldu ya da yenisi hazırlandı). Mesajı draft_id olmadan yeniden hazırla ve kullanıcıya oku.")
+        // Taslak hazırlandıktan sonra kullanıcının sesi HİÇ duyulmadıysa onay da yok:
+        // model taslağı okumadan arka arkaya iki çağrıyla gönderemesin (Astra, kritik).
+        if (AudioIO.lastUserVoiceAt <= approved.createdAt) {
+            return fail("Kullanıcı onayı duyulmadı (taslak okunduktan sonra kullanıcı konuşmadı); gönderilmedi. Metni kullanıcıya oku, onayını bekle, sonra yeni taslakla gönder.")
+        }
+        if (approved.number != contact.number || approved.channel != channel || approved.message != message) {
+            return fail("Onaylanan taslakla alıcı, kanal ya da metin aynı değil; gönderilmedi. Yeni hâlini draft_id olmadan hazırla ve kullanıcıya oku.")
+        }
         return if (channel == "sms") sendSms(contact, message) else sendWhatsApp(contact, message)
+    }
+
+    private fun draft(contact: Contact, channel: String, message: String): JSONObject {
+        val via = if (channel == "sms") "SMS" else "WhatsApp"
+        return JSONObject()
+            .put("success", true)
+            .put("sent", false)
+            .put("needs_confirmation", true)
+            .put("draft_id", MessageDrafts.put(contact.number, channel, message))
+            .put("contact", contact.name)
+            .put("channel", channel)
+            .put("text", message)
+            .put("message", "Henüz GÖNDERİLMEDİ. Kullanıcıya alıcıyı ($via, ${contact.name}) ve metni aynen oku, 'Göndereyim mi?' diye sor.")
     }
 
     private fun sendSms(contact: Contact, message: String): JSONObject {
@@ -146,6 +181,44 @@ class ContactTools(private val context: Context) {
 
     companion object {
         fun normalize(text: String) = ContactMatcher.normalize(text)
+    }
+}
+
+/** Onay bekleyen tek mesaj taslağı; yenisi eskisini geçersiz kılıyor. */
+internal object MessageDrafts {
+    class Draft(
+        val id: String,
+        val number: String,
+        val channel: String,
+        val message: String,
+        val createdAt: Long,
+        val expiresAt: Long,
+    )
+
+    /** Arabada okuma + düşünme + düzeltme turu için yeterli, unutulmuş taslak için kısa. */
+    private const val TTL_MS = 3 * 60_000L
+    private var current: Draft? = null
+
+    @Synchronized
+    fun put(number: String, channel: String, message: String): String {
+        val id = UUID.randomUUID().toString().take(8)
+        val now = SystemClock.elapsedRealtime()
+        current = Draft(id, number, channel, message, now, now + TTL_MS)
+        return id
+    }
+
+    /** Oturum kapanınca bekleyen taslak düşer: sonraki oturumda eski metin gönderilemesin. */
+    @Synchronized
+    fun clear() {
+        current = null
+    }
+
+    /** Tek kullanımlık: kimlik tutsa da tutmasa da taslak düşüyor, yanlış denemeden sonra yeniden okunmalı. */
+    @Synchronized
+    fun take(id: String): Draft? {
+        val draft = current
+        current = null
+        return draft?.takeIf { it.id == id && SystemClock.elapsedRealtime() < it.expiresAt }
     }
 }
 
