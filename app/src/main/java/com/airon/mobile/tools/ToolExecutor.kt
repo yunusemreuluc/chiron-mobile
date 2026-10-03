@@ -27,7 +27,9 @@ class ToolExecutor(context: Context, settings: AppSettings) {
     val requests = FeatureRequests(app, settings)
 
     /** Ağ ya da bekleme içerebilir — ana iş parçacığında ÇAĞIRMA. */
-    fun execute(name: String, args: JSONObject): JSONObject = try {
+    fun execute(name: String, args: JSONObject): JSONObject = run(name, args).also { RecentCalls.record(name, args, it) }
+
+    private fun run(name: String, args: JSONObject): JSONObject = try {
         when (name) {
             "call_contact" -> contacts.callContact(args)
             "send_message" -> contacts.sendMessage(args)
@@ -43,6 +45,8 @@ class ToolExecutor(context: Context, settings: AppSettings) {
             "save_quick_note" -> saveNote(args)
             "start_navigation" -> navigation.navigate(args)
             "add_feature_request" -> requests.add(args)
+            "report_bug" -> reportBug(args)
+            "get_pc_status" -> desktop.get("/api/remote/status")
             "list_feature_requests" -> requests.list()
             "remove_feature_request" -> requests.remove(args)
             else -> fail("Bilinmeyen araç: $name")
@@ -50,6 +54,28 @@ class ToolExecutor(context: Context, settings: AppSettings) {
     } catch (e: Exception) {
         Log.e("AironTools", "$name başarısız", e)
         fail("$name çalışırken hata: ${e.message ?: e.javaClass.simpleName}")
+    }
+
+    /**
+     * İ-007: hata bildirimi. İstek listesine "Hata:" başlığıyla düşer ve son araç
+     * çağrılarının ÖZETİNİ taşır (araç adı, eylem, başarı, mesajın başı) — hatayı ayıklarken
+     * "o an ne denendi" görünsün. Kişi adı / mesaj metni gibi argümanlar EKLENMEZ (kasa notu).
+     */
+    private fun reportBug(args: JSONObject): JSONObject {
+        val title = args.optString("title").trim().removePrefix("Hata:").trim()
+        if (title.isEmpty()) return fail("Hatanın kısa başlığı boş.")
+        val detail = buildString {
+            append(args.optString("description").trim().take(700))
+            val recent = RecentCalls.summary()
+            if (recent.isNotEmpty()) append("\nSon araç çağrıları: ").append(recent)
+        }
+        return requests.add(
+            JSONObject()
+                .put("title", "Hata: $title")
+                .put("user_request", args.optString("description").trim().take(300))
+                .put("attempted", "hata bildirimi (report_bug)")
+                .put("detail", detail),
+        )
     }
 
     /** Not önce telefona yazılıyor — PC'ye ulaşılamasa da not kaybolmasın. */
@@ -69,4 +95,25 @@ class ToolExecutor(context: Context, settings: AppSettings) {
             ok("Not telefona kaydedildi; PC'ye yazılamadı (${pc.optString("message")}).")
         }
     }
+}
+
+/** Son araç çağrılarının kişisel içerik taşımayan özeti — hata bildirimine eklenir. */
+internal object RecentCalls {
+    private const val KEEP = 6
+    private val items = ArrayDeque<String>()
+
+    @Synchronized
+    fun record(name: String, args: JSONObject, result: JSONObject) {
+        if (name == "report_bug") return
+        val stamp = SimpleDateFormat("HH:mm", Locale.ROOT).format(Date())
+        // Yalnız sabit küme değerli "action" alanı; serbest metin argümanları (kişi, mesaj) yazılmaz.
+        val action = args.optString("action").takeIf { it.isNotBlank() }?.let { " $it" }.orEmpty()
+        val ok = if (result.optBoolean("success")) "başarılı" else "BAŞARISIZ"
+        val message = result.optString("message").take(80)
+        items.addLast("$stamp $name$action → $ok ($message)")
+        while (items.size > KEEP) items.removeFirst()
+    }
+
+    @Synchronized
+    fun summary(): String = items.joinToString(" | ")
 }

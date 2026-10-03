@@ -73,7 +73,14 @@ class GeminiLiveClient(
                         ),
                 )
                 .put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemPrompt))))
-                .put("tools", JSONArray().put(JSONObject().put("functionDeclarations", tools)))
+                // İ-006 ("bugün gündem ne?"): Google Arama Live'ın kendi aracı — haber, hava,
+                // güncel bilgi için. Kendi araçlarımızla yan yana çalışıyor.
+                .put(
+                    "tools",
+                    JSONArray()
+                        .put(JSONObject().put("functionDeclarations", tools))
+                        .put(JSONObject().put("googleSearch", JSONObject())),
+                )
                 .put("outputAudioTranscription", JSONObject())
                 // Ekrandaki "senin söylediğin" yazısı ayrı bir tanıyıcıdan geliyor (modelin anladığı
                 // bu değil). Dil verilmeyince İngilizce tahmin edip "Aıron"u "Iron Man" yazıyordu.

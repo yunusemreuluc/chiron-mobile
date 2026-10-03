@@ -308,6 +308,8 @@ private val TOOL_LABELS = mapOf(
     "cancel_claude_job" to "Claude işini durduruyor",
     "save_quick_note" to "Not alıyor",
     "remove_feature_request" to "İsteği kaldırıyor",
+    "report_bug" to "Hatayı kaydediyor",
+    "get_pc_status" to "PC'ye bakıyor",
 )
 
 @Composable

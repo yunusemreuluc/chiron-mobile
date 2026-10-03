@@ -85,6 +85,12 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
      * sessiz ortamda). Mikrofona dokunmak sesli moda döndürür.
      */
     @Volatile private var typedMode = false
+    /**
+     * İ-008: oturum açıkken ses odağı (CarAudio, GAIN_TRANSIENT_MAY_DUCK) müziği kısıyor —
+     * "şarkıyı değiştir" deyince şarkı değişiyor ama oturum kapanana kadar ses gelmiyordu.
+     * Müzik komutu başarılı olunca Aıron cevabını bitirir bitirmez oturum kapanır, odak bırakılır.
+     */
+    private var endAfterTurn = false
     /** Oturum hazır olmadan yazılan mesajlar — onReady'de sırayla gider. */
     private val pendingTyped = ArrayList<String>()
     private var liveReady = false
@@ -283,6 +289,7 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         awaitingAck.clear()
         awaitingClaudeAck.clear()
         announcingApproval = null
+        endAfterTurn = false
         pendingTyped.clear()
         liveReady = false
         typedMode = false
@@ -364,6 +371,12 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             }
             syncClaudeUpdates(gen)
         }
+    }
+
+    private fun isMediaCommand(name: String, args: JSONObject): Boolean = when (name) {
+        "manage_device_audio" -> args.optString("action") in MEDIA_ACTIONS
+        "control_device" -> args.optString("action") == "play_youtube"
+        else -> false
     }
 
     /** Yazılan mesaj: ekrana yazılır, yazışma moduna geçilir, oturum yoksa açılır. */
@@ -485,6 +498,11 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
                     // "onaylıyorum"u PC'ye geçirebilir (ClaudeJobs ses kapısı).
                     announcingApproval?.let { ClaudeDrafts.presentApproval(it) }
                     announcingApproval = null
+                    if (endAfterTurn && runningTools.get() == 0) {
+                        endAfterTurn = false
+                        stopSession(null) // müzik duyulsun: ses odağı bırakılır
+                        return
+                    }
                     AssistantBus.phase(Phase.LISTENING)
                     flushMessages()
                 }
@@ -517,6 +535,7 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             val remaining = runningTools.decrementAndGet()
             if (gen != generation) return@execute // kullanıcı bu arada oturumu kapattı
             live?.sendToolResponse(id, name, result)
+            if (result.optBoolean("success") && isMediaCommand(name, args)) main.post { endAfterTurn = true }
             if (remaining == 0) {
                 AssistantBus.tool(null)
                 AssistantBus.phase(Phase.THINKING)
@@ -588,6 +607,7 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         private const val ACTION_VOICE = "com.airon.mobile.VOICE"
         private const val EXTRA_TEXT = "text"
         private const val TYPED_IDLE_TIMEOUT_MS = 5 * 60_000L
+        private val MEDIA_ACTIONS = setOf("media_play_pause", "media_next", "media_previous", "unmute")
         private const val MAX_TYPED_CHARS = 4000
         private const val MIC_RELEASE_MS = 400L
         private const val MAX_PENDING_MESSAGES = 5

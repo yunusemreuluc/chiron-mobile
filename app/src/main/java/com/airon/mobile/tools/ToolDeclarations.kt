@@ -191,6 +191,30 @@ object ToolDeclarations {
             )
             .put(
                 fn(
+                    "report_bug",
+                    "Kullanıcının bildirdiği bir HATAYI kaydeder ('hata bildir', 'bu çalışmadı, kaydet'). PC'deki istek " +
+                        "listesine 'Hata:' başlığıyla düşer; son araç çağrılarının özeti otomatik eklenir.",
+                    props(
+                        "title" to str("Hatanın kısa, genel başlığı; kişi adı/mesaj içeriği OLMADAN (ör. 'Şarkı değişince ses gelmiyor')."),
+                        "description" to str(
+                            "Ne oldu, ne bekleniyordu, hangi durumda (arabada mı, hangi uygulama açıktı) — 1-4 cümle. " +
+                                "Kişi adı, mesaj metni, numara yazma.",
+                        ),
+                    ),
+                    required = listOf("title", "description"),
+                ),
+            )
+            .put(
+                fn(
+                    "get_pc_status",
+                    "PC'nin anlık durum raporu, PC'deki sesli Aıron'a sormadan: açık mı, CPU/RAM, kullanıcı ne kadar " +
+                        "süredir yok, öndeki uygulama, süren ve biten Claude işleri (bitti mi, ne yapıyor), ajan ofisinde " +
+                        "kim çalışıyor. 'PC ne durumda', 'PC'de şu an ne yapılıyor', 'iş bitti mi' için BUNU kullan.",
+                    JSONObject(),
+                ),
+            )
+            .put(
+                fn(
                     "list_feature_requests",
                     "Kullanıcının istek listesini okur ('istek listemde ne var', 'hangi istekler yapıldı').",
                     JSONObject(),
