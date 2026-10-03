@@ -21,6 +21,8 @@ class ToolExecutor(context: Context, settings: AppSettings) {
     private val device = DeviceTools(app)
     private val desktop = DesktopBridge(settings)
     private val navigation = NavigationTools(app, settings)
+    /** Servis de kullanıyor: tamamlanan PC işlerini oturum açılışında sesli duyuruyor. */
+    val claude = ClaudeJobs(app, settings)
     /** Servis de kullanıyor: oturum açılışında bekleyenleri gönderip "yapıldı" haberlerini soruyor. */
     val requests = FeatureRequests(app, settings)
 
@@ -35,6 +37,9 @@ class ToolExecutor(context: Context, settings: AppSettings) {
             "get_device_health" -> device.deviceHealth()
             "query_desktop_airon" -> desktop.ask(args)
             "send_desktop_command" -> desktop.command(args)
+            "delegate_to_claude" -> claude.delegate(args)
+            "claude_job_status" -> claude.status(args)
+            "cancel_claude_job" -> claude.cancel(args)
             "save_quick_note" -> saveNote(args)
             "start_navigation" -> navigation.navigate(args)
             "add_feature_request" -> requests.add(args)

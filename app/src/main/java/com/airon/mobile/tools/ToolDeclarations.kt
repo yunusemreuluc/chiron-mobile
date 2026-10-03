@@ -37,6 +37,10 @@ object ToolDeclarations {
                         "channel" to enumStr("Kanal.", "whatsapp", "sms"),
                         "contact_id" to str("Yalnızca araç daha önce needs_choice döndürdüyse: kullanıcının seçtiği adayın contact_id'si."),
                         "draft_id" to str("Yalnızca kullanıcı taslağı AÇIKÇA onayladıktan sonra: taslak aşamasında dönen draft_id. Onay yoksa verme."),
+                        "decision" to enumStr(
+                            "Yalnız [CLAUDE İŞİ] onay sorusuna kullanıcının cevabı: evet → approve, hayır → reject. Bu durumda task olarak 'onay' yaz.",
+                            "approve", "reject",
+                        ),
                     ),
                     required = listOf("recipient", "message"),
                 ),
@@ -114,6 +118,42 @@ object ToolDeclarations {
                         "text" to str("clipboard için PC panosuna aktarılacak metin."),
                     ),
                     required = listOf("action"),
+                ),
+            )
+            .put(
+                fn(
+                    "delegate_to_claude",
+                    "PC'deki Claude Code'a (kod yazan, dosyalarla/Etsy/Drive/projelerle çalışan yapay zeka ajanı) iş verir. " +
+                        "Uzun süren, PC'de dosya/kod/proje gerektiren işler için: 'PC'de şu projeye şunu ekle', " +
+                        "'Etsy listinglerini hazırla', 'şu klasörü düzenle'. PC ekranına bakıp cevaplanacak soru için DEĞİL " +
+                        "(onun için query_desktop_airon). İş arka planda sürer; bitince haber gelir. İKİ AŞAMALI: draft_id olmadan çağrı " +
+                        "işi VERMEZ, taslak döner; görevi kullanıcıya okuyup onay al, sonra aynı task ve dönen draft_id ile tekrar çağır. " +
+                        "İstisna: [CLAUDE İŞİ] onay sorusuna kullanıcının cevabı — o zaman draft_id gerekmez: resume_job_id + decision ver.",
+                    props(
+                        "task" to str("Kullanıcının istediği iş, ayrıntısıyla, tam cümle; kendi yorumunu ekleme."),
+                        "resume_job_id" to str("Yalnız önceki bir işi sürdürmek veya onay cevabı vermek için o işin job_id'si."),
+                        "draft_id" to str("Yalnızca kullanıcı taslağı AÇIKÇA onayladıktan sonra: taslak aşamasında dönen draft_id. Onay yoksa verme."),
+                        "decision" to enumStr(
+                            "Yalnız [CLAUDE İŞİ] onay sorusuna kullanıcının cevabı: evet → approve, hayır → reject. Bu durumda task olarak 'onay' yaz.",
+                            "approve", "reject",
+                        ),
+                    ),
+                    required = listOf("task"),
+                ),
+            )
+            .put(
+                fn(
+                    "claude_job_status",
+                    "PC'deki Claude işlerinin durumunu okur ('Claude ne yapıyor', 'iş bitti mi').",
+                    props("job_id" to str("Bakılacak işin job_id'si; verilmezse son işler okunur.")),
+                ),
+            )
+            .put(
+                fn(
+                    "cancel_claude_job",
+                    "Süren Claude işini durdurur.",
+                    props("job_id" to str("Durdurulacak işin job_id'si.")),
+                    required = listOf("job_id"),
                 ),
             )
             .put(

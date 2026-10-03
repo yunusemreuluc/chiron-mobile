@@ -23,6 +23,8 @@ import com.airon.mobile.live.GeminiLiveClient
 import com.airon.mobile.live.SystemPrompt
 import com.airon.mobile.service.AssistantBus.Phase
 import com.airon.mobile.tools.ToolDeclarations
+import com.airon.mobile.tools.ClaudeAnnouncement
+import com.airon.mobile.tools.ClaudeDrafts
 import com.airon.mobile.tools.MessageAnnouncer
 import com.airon.mobile.tools.MessageDrafts
 import com.airon.mobile.tools.ToolExecutor
@@ -69,9 +71,14 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
     private val pendingMessages = ArrayDeque<MessageAnnouncer.Message>()
     /** PC'de "yapıldı" olmuş istekler: (numara, başlık). Kullanıcının ilk isteği bittikten sonra söyleniyor. */
     private val pendingDone = ArrayList<Pair<String, String>>()
+    /** PC'deki Claude'un kullanıcıya henüz söylenmemiş sonuçları. */
+    private val pendingClaude = ArrayList<ClaudeAnnouncement.Job>()
     private var turnsThisSession = 0
     /** Söylenmesi için gönderilen "yapıldı" numaraları — cevap turu bitince onaylanır. */
     private val awaitingAck = ArrayList<String>()
+    private val awaitingClaudeAck = ArrayList<String>()
+    /** Onay sorusu modele verildi, okunması sürüyor: bitince ClaudeDrafts.presentApproval. */
+    private var announcingApproval: String? = null
     private val announcer: (MessageAnnouncer.Message) -> Unit = { m -> main.post { onIncomingMessage(m) } }
     private val idleStop = Runnable {
         // Uzun bir okuma sürerken (kuyrukta ses var) boşta sayılmaz; kısa Bluetooth
@@ -110,7 +117,19 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         if (!settings.carMode) pendingMessages.clear() // kullanıcı bu arada araba modunu kapattı
         // "Yapıldı" haberi kullanıcının kendi işinin önüne geçmesin.
         val doneReady = pendingDone.isNotEmpty() && turnsThisSession > 0
-        if ((pendingMessages.isEmpty() && !doneReady) || runningTools.get() > 0) return
+        // Claude sonucu ise beklemez: kullanıcı oturumu çoğunlukla "Claude bitti"
+        // bildirimine dokunarak açıyor, yani duymak istediği şey tam da bu.
+        // Aynı anda TEK onay sorusu: kullanıcının bir "evet"i iki işin kapısını açmasın
+        // (Astra). Açık bir soru varken sıradaki onay bekler; biten işler beklemez.
+        var approvalTaken = ClaudeDrafts.hasOpenApproval() || announcingApproval != null
+        val claudeBatch = pendingClaude.filter {
+            if (it.status != "needs_approval") return@filter true
+            if (approvalTaken) return@filter false
+            approvalTaken = true
+            true
+        }
+        val claudeReady = claudeBatch.isNotEmpty()
+        if ((pendingMessages.isEmpty() && !doneReady && !claudeReady) || runningTools.get() > 0) return
         val io = audio ?: return
         if (AssistantBus.state.value.phase != Phase.LISTENING || io.isSpeaking) return
         // Kullanıcı konuşuyor olabilir (yazıya dökme henüz gelmemiş): sustuğundan emin ol.
@@ -132,6 +151,14 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             awaitingAck += pendingDone.map { it.first }
             pendingDone.clear()
         }
+        if (claudeReady) {
+            claudeBatch.forEach { parts += ClaudeAnnouncement.format(it) }
+            // Onay kapısı soru OKUNUP BİTİNCE açılır (onTurnComplete → ses bitti), gönderimde değil.
+            announcingApproval = claudeBatch.firstOrNull { it.status == "needs_approval" }?.id
+            // Bildirim ack değildir: yalnız model sonucu sesli söyleyip bitirince PC'ye ack gider.
+            awaitingClaudeAck += claudeBatch.map { it.id }
+            pendingClaude.removeAll(claudeBatch.toSet())
+        }
         client.sendText(parts.joinToString("\n"))
         AssistantBus.phase(Phase.THINKING)
         touch()
@@ -148,6 +175,8 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
                 settings.wakeEnabled = false
                 if (live == null) stopSession(null)
             }
+            // "Claude bitti" bildirimine dokunuldu: oturum açıksa sonucu hemen çek.
+            ACTION_CLAUDE -> if (live == null) startSession() else syncClaudeUpdates(generation)
             else -> startSession()
         }
         return START_NOT_STICKY
@@ -232,11 +261,15 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         main.removeCallbacksAndMessages(null)
         pendingMessages.clear()
         pendingDone.clear()
+        pendingClaude.clear()
         awaitingAck.clear()
+        awaitingClaudeAck.clear()
+        announcingApproval = null
         turnsThisSession = 0
         live?.close()
         live = null
         MessageDrafts.clear() // onaylanmamış mesaj taslağı oturumla birlikte düşer
+        ClaudeDrafts.clear() // okunmuş onay soruları da: sonraki oturumda yeniden okunur
         audio?.stop()
         audio = null
         wake?.stop()
@@ -294,6 +327,28 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
                     }
                 }
             }
+            syncClaudeUpdates(gen)
+        }
+    }
+
+    /** PC'deki Claude'un söylenmemiş sonuçlarını çeker ve sıradaki dinleme anında okutur. */
+    private fun syncClaudeUpdates(gen: Int) {
+        syncThread.execute {
+            val updates = tools.claude.updates().map {
+                ClaudeAnnouncement.Job(
+                    id = it.optString("id"),
+                    status = it.optString("status"),
+                    summary = it.optString("summary").ifBlank { it.optString("error") },
+                    approval = it.optString("approval"),
+                )
+            }
+            if (updates.isEmpty()) return@execute
+            main.post {
+                if (gen != generation || live == null) return@post
+                val known = pendingClaude.map { it.id }.toSet() + awaitingClaudeAck
+                pendingClaude += updates.filter { it.id !in known }
+                flushMessages()
+            }
         }
     }
 
@@ -333,6 +388,17 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
                 if (io.isSpeaking) {
                     main.postDelayed(this, 150)
                 } else if (live != null) {
+                    // Claude sonucu ancak ses sonuna kadar çalındıysa "söylendi" sayılır
+                    // (Astra: tur bitince ack gidiyordu, ses kesilse de).
+                    if (awaitingClaudeAck.isNotEmpty()) {
+                        val ids = awaitingClaudeAck.toList()
+                        awaitingClaudeAck.clear()
+                        syncThread.execute { tools.claude.acknowledge(ids) }
+                    }
+                    // Onay sorusu sonuna kadar okundu: ancak bundan SONRAKİ kullanıcı sesi
+                    // "onaylıyorum"u PC'ye geçirebilir (ClaudeJobs ses kapısı).
+                    announcingApproval?.let { ClaudeDrafts.presentApproval(it) }
+                    announcingApproval = null
                     AssistantBus.phase(Phase.LISTENING)
                     flushMessages()
                 }
@@ -342,6 +408,12 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
     }
 
     override fun onInterrupted() {
+        // Kullanıcı sözü kesti: Claude sonucu tam duyulmadı, ack gitmez; sonraki
+        // oturumda yeniden okunur.
+        main.post {
+            awaitingClaudeAck.clear()
+            announcingApproval = null // soru yarım kaldı: kapı açılmaz, sonraki oturumda yeniden sorulur
+        }
         audio?.flushPlayback()
         synchronized(outBuf) { outBuf.clear() }
     }
@@ -425,12 +497,17 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         private const val BT_IDLE_TIMEOUT_MS = 15_000L
         private const val ACTION_WAKE_ON = "com.airon.mobile.WAKE_ON"
         private const val ACTION_WAKE_OFF = "com.airon.mobile.WAKE_OFF"
+        private const val ACTION_CLAUDE = "com.airon.mobile.CLAUDE"
         private const val MIC_RELEASE_MS = 400L
         private const val MAX_PENDING_MESSAGES = 5
         private const val USER_QUIET_MS = 1500L
 
         fun start(context: Context) =
             ContextCompat.startForegroundService(context, Intent(context, AssistantService::class.java))
+
+        /** Bildirimden: Claude sonucunu okutmak için oturum aç (ya da açık oturumda çek). Ön plandan çağrılmalı. */
+        fun showClaudeResult(context: Context) =
+            ContextCompat.startForegroundService(context, Intent(context, AssistantService::class.java).setAction(ACTION_CLAUDE))
 
         fun stop(context: Context) =
             context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_STOP))

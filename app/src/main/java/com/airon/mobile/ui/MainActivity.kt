@@ -1,5 +1,9 @@
 package com.airon.mobile.ui
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import androidx.core.content.ContextCompat
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
@@ -99,6 +103,20 @@ class MainActivity : ComponentActivity() {
         BackgroundLaunch.activityVisible = true
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleClaudeIntent(intent)
+    }
+
+    /** "Claude bitti / onay bekliyor" bildirimi: konuşmayı açıp sonucu okut. */
+    private fun handleClaudeIntent(intent: Intent?) {
+        if (intent?.action != ACTION_CLAUDE_RESULT) return
+        intent.action = null // döndürmede tekrar tetiklenmesin
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+            AssistantService.showClaudeResult(this)
+        }
+    }
+
     override fun onPause() {
         BackgroundLaunch.activityVisible = false
         super.onPause()
@@ -107,11 +125,16 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        if (savedInstanceState == null) handleClaudeIntent(intent)
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = CoreColors.Ice, background = CoreColors.Background)) {
                 AironScreen()
             }
         }
+    }
+
+    companion object {
+        const val ACTION_CLAUDE_RESULT = "com.airon.mobile.CLAUDE_RESULT"
     }
 }
 
@@ -250,6 +273,9 @@ private val TOOL_LABELS = mapOf(
     "get_device_health" to "Pile bakıyor",
     "query_desktop_airon" to "PC'ye soruyor",
     "send_desktop_command" to "PC'ye komut gönderiyor",
+    "delegate_to_claude" to "Claude'a iş veriyor",
+    "claude_job_status" to "Claude'a bakıyor",
+    "cancel_claude_job" to "Claude işini durduruyor",
     "save_quick_note" to "Not alıyor",
 )
 
