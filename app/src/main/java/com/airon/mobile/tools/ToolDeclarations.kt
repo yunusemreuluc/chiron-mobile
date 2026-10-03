@@ -198,6 +198,16 @@ object ToolDeclarations {
             )
             .put(
                 fn(
+                    "remove_feature_request",
+                    "Kullanıcının istek listesinden bir isteği kaldırır. YALNIZCA kullanıcı hangi isteği kastettiğini söyleyip kaldırmayı onayladıktan sonra çağır.",
+                    props(
+                        "number" to str("İstek numarası, 'İ-003' biçiminde; kullanıcı 'üç numara' derse 'İ-003'."),
+                        "title" to str("Yalnız henüz PC'ye gitmemiş istek için başlık."),
+                    ),
+                ),
+            )
+            .put(
+                fn(
                     "save_quick_note",
                     "Hızlı not alır ('bunu not et', 'aklıma geldi yaz'). Telefona kaydeder, PC'ye ulaşılabiliyorsa oraya da yazar.",
                     props("text" to str("Notun metni.")),

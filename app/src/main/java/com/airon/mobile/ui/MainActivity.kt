@@ -41,6 +41,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.automirrored.rounded.Send
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.DropdownMenuItem
@@ -80,6 +81,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -92,6 +95,8 @@ import com.airon.mobile.service.AssistantBus
 import com.airon.mobile.service.AssistantBus.Phase
 import com.airon.mobile.service.AssistantService
 import com.airon.mobile.tools.BackgroundLaunch
+import com.airon.mobile.tools.ClaudeJobs
+import kotlinx.coroutines.delay
 import com.airon.mobile.tools.DesktopBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -167,6 +172,18 @@ private fun AironScreen() {
     var wakeOn by remember(refresh) { mutableStateOf(settings.wakeEnabled) }
     val micGranted = Permissions.runtime.first() !in missingRuntime
 
+    // Süren Claude işinin canlı şeridi — yalnız ekran açıkken, PC oturumu varken yoklanır.
+    LaunchedEffect(lifecycle) {
+        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            val claude = ClaudeJobs(context, settings)
+            while (true) {
+                val line = if (settings.pcSession.isBlank()) null else withContext(Dispatchers.IO) { claude.activeLine() }
+                AssistantBus.claudeStatus(line)
+                delay(if (line != null) 5_000L else 20_000L)
+            }
+        }
+    }
+
     // "Aıron" dinlemesi açık bırakıldıysa uygulama her açılışta dinlemeyi geri getiriyor
     // (Android arka plandan mikrofon servisi başlatmaya izin vermiyor).
     LaunchedEffect(micGranted) {
@@ -191,7 +208,10 @@ private fun AironScreen() {
             Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text("Aıron", color = Color(0xF2EDF2FA), fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                    Text(phaseLabel(state.phase, state.activeTool), color = Muted, fontSize = 13.sp)
+                    Text(
+                        phaseLabel(state.phase, state.activeTool) + if (state.typing && state.phase != Phase.OFF) " · yazışma, ses kapalı" else "",
+                        color = Muted, fontSize = 13.sp,
+                    )
                 }
                 WakeToggle(on = wakeOn, enabled = micGranted && !showRecorder) {
                     wakeOn = !wakeOn
@@ -200,6 +220,10 @@ private fun AironScreen() {
                 IconButton(enabled = !showRecorder, onClick = { showSettings = !showSettings }) {
                     Icon(Icons.Rounded.Settings, "Ayarlar", tint = Muted)
                 }
+            }
+
+            AnimatedVisibility(state.claudeStatus != null && !showSettings && !showRecorder, enter = fadeIn(), exit = fadeOut()) {
+                ClaudeStrip(state.claudeStatus.orEmpty())
             }
 
             if (showRecorder) {
@@ -242,11 +266,17 @@ private fun AironScreen() {
                 }
 
                 val inSession = state.phase != Phase.OFF && state.phase != Phase.WAITING
-                MicButton(
-                    active = inSession,
+                Composer(
+                    // Yazışma modunda mikrofon "kapalı" görünür: dokununca sesli moda döner.
+                    micActive = inSession && !state.typing,
                     enabled = micGranted,
-                    onClick = {
-                        if (inSession) AssistantService.stop(context) else AssistantService.start(context)
+                    onSend = { AssistantService.sendText(context, it) },
+                    onMic = {
+                        when {
+                            inSession && state.typing -> AssistantService.voiceMode(context)
+                            inSession -> AssistantService.stop(context)
+                            else -> AssistantService.start(context)
+                        }
                     },
                 )
             }
@@ -277,6 +307,7 @@ private val TOOL_LABELS = mapOf(
     "claude_job_status" to "Claude'a bakıyor",
     "cancel_claude_job" to "Claude işini durduruyor",
     "save_quick_note" to "Not alıyor",
+    "remove_feature_request" to "İsteği kaldırıyor",
 )
 
 @Composable
@@ -290,6 +321,10 @@ private fun Transcript(lines: List<AssistantBus.Line>, modifier: Modifier) {
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         items(lines, key = { it.id }) { line ->
+            if (line.claude) {
+                ClaudeBubble(line.text)
+                return@items
+            }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = if (line.fromUser) Arrangement.End else Arrangement.Start) {
                 Text(
                     line.text,
@@ -321,6 +356,106 @@ private fun WakeToggle(on: Boolean, enabled: Boolean, onClick: () -> Unit) {
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 6.dp),
     )
+}
+
+/** PC'deki Claude'un rengi — Ajan Ofisi'ndeki "Şef" masasıyla aynı. */
+private val ClaudeTint = Color(0xFFFFB38A)
+
+@Composable
+private fun ClaudeStrip(text: String) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 2.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0x14FFB38A))
+            .border(1.dp, Color(0x33FFB38A), RoundedCornerShape(12.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(7.dp).clip(CircleShape).background(ClaudeTint))
+        Spacer(Modifier.size(8.dp))
+        Text(text, color = ClaudeTint, fontSize = 13.sp, maxLines = 1)
+    }
+}
+
+@Composable
+private fun ClaudeBubble(text: String) {
+    val title = text.substringBefore('\n')
+    val body = text.substringAfter('\n', "")
+    val shape = RoundedCornerShape(6.dp, 20.dp, 20.dp, 20.dp)
+    Column(
+        Modifier
+            .padding(end = 24.dp)
+            .clip(shape)
+            .background(Color(0x1AFFB38A))
+            .border(1.dp, Color(0x40FFB38A), shape)
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+    ) {
+        Text(title, color = ClaudeTint, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        if (body.isNotBlank()) Text(body, color = Color(0xFFF2E6DE), fontSize = 15.sp, lineHeight = 22.sp)
+    }
+}
+
+/** Alt çubuk: yazı kutusu + gönder; kutu boşken mikrofon. */
+@Composable
+private fun Composer(micActive: Boolean, enabled: Boolean, onSend: (String) -> Unit, onMic: () -> Unit) {
+    var text by remember { mutableStateOf("") }
+    val send = {
+        val trimmed = text.trim()
+        if (trimmed.isNotEmpty()) {
+            onSend(trimmed)
+            text = ""
+        }
+    }
+    Row(
+        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        OutlinedTextField(
+            value = text,
+            onValueChange = { text = it.take(4000) },
+            placeholder = { Text("Aıron'a yaz…", color = Faint) },
+            enabled = enabled,
+            maxLines = 4,
+            shape = RoundedCornerShape(24.dp),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(onSend = { send() }),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = Color(0x597FB2FF),
+                unfocusedBorderColor = Hairline,
+                focusedContainerColor = Glass,
+                unfocusedContainerColor = Glass,
+                focusedTextColor = Color(0xF2EDF2FA),
+                unfocusedTextColor = Color(0xF2EDF2FA),
+                cursorColor = CoreColors.Ice,
+            ),
+            modifier = Modifier.weight(1f),
+        )
+        Spacer(Modifier.size(10.dp))
+        val hasText = text.isNotBlank()
+        val active = micActive && !hasText
+        Box(
+            Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(if (active || hasText) CoreColors.Ice else Glass)
+                .border(1.dp, if (active || hasText) Color.Transparent else Color(0x597FB2FF), CircleShape)
+                .clickable(enabled = enabled) { if (hasText) send() else onMic() },
+            contentAlignment = Alignment.Center,
+        ) {
+            val (icon, label) = when {
+                hasText -> Icons.AutoMirrored.Rounded.Send to "Gönder"
+                active -> Icons.Rounded.Stop to "Oturumu bitir"
+                else -> Icons.Rounded.Mic to "Konuş"
+            }
+            Icon(
+                icon, label,
+                tint = if (active || hasText) CoreColors.Background else CoreColors.Ice,
+                modifier = Modifier.size(26.dp),
+            )
+        }
+    }
 }
 
 @Composable

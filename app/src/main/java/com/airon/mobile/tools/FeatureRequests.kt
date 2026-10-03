@@ -82,6 +82,49 @@ class FeatureRequests(context: Context, settings: AppSettings) {
             .put("pending_on_phone", pendingOnPhone)
     }
 
+    fun remove(args: JSONObject): JSONObject {
+        val number = args.optString("number").trim()
+        if (number.isEmpty()) {
+            val title = args.optString("title").trim()
+            if (title.isEmpty()) return fail("İstek numarası boş.")
+            return removePending(title)
+        }
+
+        val response = desktop.post(
+            "/api/remote/requests/remove",
+            JSONObject().put("number", number),
+        )
+        return if (!response.optBoolean("success") && response.optString("message").isBlank()) {
+            fail("İstek kaldırılamadı; PC'den açıklama alınamadı.")
+        } else {
+            response
+        }
+    }
+
+    private fun removePending(title: String): JSONObject = synchronized(LOCK) {
+        val pending = read(file)
+        val exactIndex = (0 until pending.length()).firstOrNull { index ->
+            pending.optJSONObject(index)?.optString("title")?.trim() == title
+        }
+        val normalizedTitle = ContactTools.normalize(title)
+        val matchIndex = exactIndex ?: (0 until pending.length()).firstOrNull { index ->
+            normalizedTitle.isNotEmpty() &&
+                ContactTools.normalize(pending.optJSONObject(index)?.optString("title").orEmpty()) == normalizedTitle
+        }
+        if (matchIndex == null) return@synchronized fail("Telefonda bekleyen bu başlıkta bir istek bulunamadı.")
+
+        val removed = pending.getJSONObject(matchIndex)
+        val left = JSONArray()
+        for (i in 0 until pending.length()) {
+            if (i != matchIndex) left.put(pending.getJSONObject(i))
+        }
+        write(file, left)
+        ok(
+            "İstek telefondaki bekleyen listeden kaldırıldı.",
+            "data" to JSONObject().put("title", removed.optString("title")),
+        )
+    }
+
     /** Bekleyenleri PC'ye gönderir. Gönderilenlerin kimlik → numara eşlemesini döner. */
     fun flush(): Map<String, String> = synchronized(LOCK) {
         retryAcks()

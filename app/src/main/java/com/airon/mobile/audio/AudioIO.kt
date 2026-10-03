@@ -52,6 +52,28 @@ class AudioIO(
     @Volatile var path = CarAudio.Route.PHONE
         private set
 
+    /**
+     * Yazışma modu kilidi. Mikrofon karesi "duraklı mı?" kontrolü ile `lastUserVoiceAt`
+     * güncellemesi AYNI kilit altında: aksi hâlde kontrolü geçmiş eski bir kare, mod
+     * değiştikten sonra damgayı ileri alıp onay kapısını açabiliyordu (Astra, kritik).
+     */
+    private val modeLock = Any()
+
+    /** Yazışma modu: mikrofon okunur ama ne seviye ne çerçeve kullanılır. */
+    var micPaused = false
+        get() = synchronized(modeLock) { field }
+        set(value) = synchronized(modeLock) { field = value }
+
+    /** Yazışma modu: cevap sesi çalınmaz; açılırken kuyruk da boşaltılır (aynı kilit, play ile yarışmaz). */
+    var playbackMuted = false
+        get() = synchronized(modeLock) { field }
+        set(value) {
+            synchronized(modeLock) {
+                field = value
+                if (value) flushPlayback()
+            }
+        }
+
     val isSpeaking: Boolean
         get() = writing || playQueue.isNotEmpty() || SystemClock.elapsedRealtime() - lastPlaybackAt < echoTailMs
 
@@ -110,14 +132,23 @@ class AudioIO(
                 while (running) {
                     val read = rec.read(buffer, 0, buffer.size)
                     if (read <= 0) continue
-                    if (isSpeaking) {
+                    // Yazışma modunda mikrofon tamamen duraklı: ortam sesi ne Gemini'ye gider ne de
+                    // "kullanıcı konuştu" sayılıp onay kapısını (lastUserVoiceAt) açar.
+                    val lvl = synchronized(modeLock) {
+                        if (isSpeaking || micPaused) {
+                            null
+                        } else {
+                            level(buffer, read).also {
+                                if (it >= VOICE_LEVEL) {
+                                    lastVoiceAt = SystemClock.elapsedRealtime()
+                                    lastUserVoiceAt = lastVoiceAt
+                                }
+                            }
+                        }
+                    }
+                    if (lvl == null) {
                         onMicLevel(0f)
                         continue
-                    }
-                    val lvl = level(buffer, read)
-                    if (lvl >= VOICE_LEVEL) {
-                        lastVoiceAt = SystemClock.elapsedRealtime()
-                        lastUserVoiceAt = lastVoiceAt
                     }
                     onMicLevel(lvl)
                     onMicFrame(buffer, read)
@@ -164,7 +195,9 @@ class AudioIO(
     }
 
     fun play(pcm24k: ByteArray) {
-        if (running) playQueue.offer(pcm24k)
+        synchronized(modeLock) {
+            if (running && !playbackMuted) playQueue.offer(pcm24k)
+        }
     }
 
     /** Model sözü kesildiğini bildirdi: kuyruktaki eski cevabı çalma. */
@@ -224,6 +257,10 @@ class AudioIO(
          * Kullanıcının sesinin son duyulduğu an (elapsedRealtime), oturumdan bağımsız.
          * Mesaj taslağının onayını doğrulamak için (ContactTools). Aıron konuşurken
          * mikrofon kapalı olduğundan bu an yalnız kullanıcı gerçekten konuştuğunda ilerler.
+         */
+        /**
+         * Kullanıcının son GERÇEK girdisi: mikrofonda sesi ya da yazdığı mesaj (servis
+         * yazılı mesajda bunu da günceller). Mesaj/Claude onay kapıları buna bakıyor.
          */
         @Volatile var lastUserVoiceAt = 0L
 

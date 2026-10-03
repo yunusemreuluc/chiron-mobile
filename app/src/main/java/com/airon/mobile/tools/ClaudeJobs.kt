@@ -130,6 +130,25 @@ class ClaudeJobs(context: Context, settings: AppSettings) {
         return ok(response.optString("message").ifBlank { "Claude işi durduruldu." }, "job_id" to jobId)
     }
 
+    /**
+     * Ekrandaki canlı şerit için: süren (ya da sıradaki) Claude işinin tek satırı, yoksa null.
+     * Ağ hatasında da null — şerit yanlış bir "çalışıyor" göstermesin.
+     */
+    fun activeLine(): String? {
+        val response = desktop.get("/api/remote/claude")
+        if (!response.optBoolean("success")) return null
+        val jobs = response.optJSONObject("data")?.optJSONArray("jobs") ?: return null
+        val job = (0 until jobs.length()).mapNotNull { jobs.optJSONObject(it) }
+            .firstOrNull { it.optString("status") == "running" }
+            ?: (0 until jobs.length()).mapNotNull { jobs.optJSONObject(it) }
+                .firstOrNull { it.optString("status") == "queued" }
+            ?: return null
+        if (job.optString("status") == "queued") return "Claude · sırada"
+        val step = job.optString("last_step").ifBlank { "başlıyor" }.take(90)
+        val minutes = job.optInt("elapsed_seconds") / 60
+        return "Claude · $step" + if (minutes > 0) " · $minutes dk" else ""
+    }
+
     /** Kullanıcıya henüz söylenmemiş sonuçlar. Ağ hatası konuşma oturumunu bozmaz. */
     fun updates(): List<JSONObject> = fetchUpdates().jobs
 

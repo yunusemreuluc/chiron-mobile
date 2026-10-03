@@ -79,6 +79,15 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
     private val awaitingClaudeAck = ArrayList<String>()
     /** Onay sorusu modele verildi, okunması sürüyor: bitince ClaudeDrafts.presentApproval. */
     private var announcingApproval: String? = null
+    /**
+     * Yazışma modu (2026-10-03, kullanıcı isteği "telefonda Claude ile yazışır gibi"):
+     * kullanıcı klavyeyle yazdı → Aıron sesli cevap vermez, mikrofon duraklar (toplantıda,
+     * sessiz ortamda). Mikrofona dokunmak sesli moda döndürür.
+     */
+    @Volatile private var typedMode = false
+    /** Oturum hazır olmadan yazılan mesajlar — onReady'de sırayla gider. */
+    private val pendingTyped = ArrayList<String>()
+    private var liveReady = false
     private val announcer: (MessageAnnouncer.Message) -> Unit = { m -> main.post { onIncomingMessage(m) } }
     private val idleStop = Runnable {
         // Uzun bir okuma sürerken (kuyrukta ses var) boşta sayılmaz; kısa Bluetooth
@@ -152,7 +161,10 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             pendingDone.clear()
         }
         if (claudeReady) {
-            claudeBatch.forEach { parts += ClaudeAnnouncement.format(it) }
+            claudeBatch.forEach {
+                parts += ClaudeAnnouncement.format(it)
+                AssistantBus.line(fromUser = false, text = claudeBubble(it), claude = true)
+            }
             // Onay kapısı soru OKUNUP BİTİNCE açılır (onTurnComplete → ses bitti), gönderimde değil.
             announcingApproval = claudeBatch.firstOrNull { it.status == "needs_approval" }?.id
             // Bildirim ack değildir: yalnız model sonucu sesli söyleyip bitirince PC'ye ack gider.
@@ -175,6 +187,8 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
                 settings.wakeEnabled = false
                 if (live == null) stopSession(null)
             }
+            ACTION_TEXT -> intent?.getStringExtra(EXTRA_TEXT)?.let(::onTyped)
+            ACTION_VOICE -> setTyped(false)
             // "Claude bitti" bildirimine dokunuldu: oturum açıksa sonucu hemen çek.
             ACTION_CLAUDE -> if (live == null) startSession() else syncClaudeUpdates(generation)
             else -> startSession()
@@ -250,7 +264,11 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             this,
             onMicFrame = { frame, length -> live?.sendAudio(frame, length) },
             onMicLevel = AssistantBus::micLevel,
-        )
+        ).also {
+            // Mikrofon başlamadan ÖNCE: yazılı mesajla açılan oturumda tek kare bile sayılmasın.
+            it.micPaused = typedMode
+            it.playbackMuted = typedMode
+        }
         live = GeminiLiveClient(key, this).also {
             it.connect(MODEL, settings.voice, SystemPrompt.build(settings.carMode), ToolDeclarations.all)
         }
@@ -265,6 +283,10 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         awaitingAck.clear()
         awaitingClaudeAck.clear()
         announcingApproval = null
+        pendingTyped.clear()
+        liveReady = false
+        typedMode = false
+        AssistantBus.typing(false)
         turnsThisSession = 0
         live?.close()
         live = null
@@ -297,7 +319,12 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         // Bluetooth'ta oturum sürdükçe müzik kısık (ya da araba görüşme kaynağında) kalıyor:
         // 45 sn orada çok uzun.
         val bluetooth = audio?.path?.let { it != CarAudio.Route.PHONE } == true
-        main.postDelayed(idleStop, if (bluetooth) BT_IDLE_TIMEOUT_MS else IDLE_TIMEOUT_MS)
+        val timeout = when {
+            typedMode -> TYPED_IDLE_TIMEOUT_MS // yazmak konuşmaktan uzun sürüyor
+            bluetooth -> BT_IDLE_TIMEOUT_MS
+            else -> IDLE_TIMEOUT_MS
+        }
+        main.postDelayed(idleStop, timeout)
     }
 
     // ── GeminiLiveClient.Listener (OkHttp iş parçacığı) ─────────────────────
@@ -307,13 +334,21 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         main.post {
             if (gen != generation || live == null) return@post
             // Mikrofonu uyandırma dinleyicisinden devral; "Aıron …" ile gelen sesi önce Gemini'ye ver.
-            val heldAudio = wake?.handOff(keepAudio = wakeTriggered).orEmpty()
+            // Yazışma moduna geçildiyse uyandırma tamponundaki ortam sesi Gemini'ye gitmez.
+            val heldAudio = wake?.handOff(keepAudio = wakeTriggered && !typedMode).orEmpty()
             wake = null
             heldAudio.forEach { live?.sendAudio(it, it.size) }
             audio?.start()
+            liveReady = true
             AssistantBus.phase(Phase.LISTENING)
             touch()
-            flushMessages()
+            if (pendingTyped.isNotEmpty()) {
+                val typed = pendingTyped.joinToString("\n")
+                pendingTyped.clear()
+                sendTyped(typed)
+            } else {
+                flushMessages()
+            }
             // İstek listesi: telefonda bekleyenleri PC'ye gönder, "yapıldı" olanları sor.
             syncThread.execute {
                 tools.requests.flush()
@@ -328,6 +363,52 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
                 }
             }
             syncClaudeUpdates(gen)
+        }
+    }
+
+    /** Yazılan mesaj: ekrana yazılır, yazışma moduna geçilir, oturum yoksa açılır. */
+    private fun onTyped(raw: String) {
+        val text = raw.trim().take(MAX_TYPED_CHARS)
+        if (text.isEmpty() || destroyed) return
+        // Yazılan mesaj kullanıcının kendi sözü: mesaj taslağı / Claude onay kapıları
+        // (AudioIO.lastUserVoiceAt) bunu "kullanıcı cevap verdi" olarak görmeli.
+        AudioIO.lastUserVoiceAt = android.os.SystemClock.elapsedRealtime()
+        AssistantBus.line(fromUser = true, text = text)
+        setTyped(true)
+        if (live == null) {
+            pendingTyped += text
+            startSession()
+        } else if (!liveReady) {
+            pendingTyped += text
+        } else {
+            sendTyped(text)
+        }
+    }
+
+    private fun sendTyped(text: String) {
+        val client = live ?: return
+        audio?.flushPlayback() // yarım kalan sesli cevap kullanıcının yeni mesajını bastırmasın
+        client.sendText(text)
+        AssistantBus.phase(Phase.THINKING)
+        touch()
+    }
+
+    private fun setTyped(on: Boolean) {
+        typedMode = on
+        audio?.micPaused = on
+        audio?.playbackMuted = on // kuyruğu aynı kilitle boşaltır; geç gelen parça çalınmaz
+        AssistantBus.typing(on)
+        main.post(::touch)
+    }
+
+    private fun claudeBubble(job: ClaudeAnnouncement.Job): String {
+        val body = job.summary.take(1500)
+        return when (job.status) {
+            "done" -> "Claude · bitti\n$body"
+            "needs_approval" -> "Claude · onay bekliyor\n${job.approval.ifBlank { body }}"
+            "timeout" -> "Claude · süre doldu\n$body"
+            "interrupted" -> "Claude · yarıda kaldı\n$body"
+            else -> "Claude · tamamlanamadı\n$body"
         }
     }
 
@@ -353,6 +434,11 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
     }
 
     override fun onAudio(pcm24k: ByteArray) {
+        // Yazışma modu: cevap ekranda yazı olarak gelir (output transcript), ses çalınmaz.
+        if (typedMode) {
+            main.post(::touch)
+            return
+        }
         audio?.play(pcm24k)
         if (AssistantBus.state.value.phase != Phase.SPEAKING) AssistantBus.phase(Phase.SPEAKING)
         main.post(::touch)
@@ -498,12 +584,28 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         private const val ACTION_WAKE_ON = "com.airon.mobile.WAKE_ON"
         private const val ACTION_WAKE_OFF = "com.airon.mobile.WAKE_OFF"
         private const val ACTION_CLAUDE = "com.airon.mobile.CLAUDE"
+        private const val ACTION_TEXT = "com.airon.mobile.TEXT"
+        private const val ACTION_VOICE = "com.airon.mobile.VOICE"
+        private const val EXTRA_TEXT = "text"
+        private const val TYPED_IDLE_TIMEOUT_MS = 5 * 60_000L
+        private const val MAX_TYPED_CHARS = 4000
         private const val MIC_RELEASE_MS = 400L
         private const val MAX_PENDING_MESSAGES = 5
         private const val USER_QUIET_MS = 1500L
 
         fun start(context: Context) =
             ContextCompat.startForegroundService(context, Intent(context, AssistantService::class.java))
+
+        /** Ekrandan yazılan mesaj. Ön plandan çağrılmalı (oturum yoksa mikrofon servisi açılır). */
+        fun sendText(context: Context, text: String) =
+            ContextCompat.startForegroundService(
+                context,
+                Intent(context, AssistantService::class.java).setAction(ACTION_TEXT).putExtra(EXTRA_TEXT, text),
+            )
+
+        /** Yazışma modundan sesli moda dön. */
+        fun voiceMode(context: Context) =
+            context.startService(Intent(context, AssistantService::class.java).setAction(ACTION_VOICE))
 
         /** Bildirimden: Claude sonucunu okutmak için oturum aç (ya da açık oturumda çek). Ön plandan çağrılmalı. */
         fun showClaudeResult(context: Context) =

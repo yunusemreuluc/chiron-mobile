@@ -44,6 +44,7 @@ class ToolExecutor(context: Context, settings: AppSettings) {
             "start_navigation" -> navigation.navigate(args)
             "add_feature_request" -> requests.add(args)
             "list_feature_requests" -> requests.list()
+            "remove_feature_request" -> requests.remove(args)
             else -> fail("Bilinmeyen araç: $name")
         }
     } catch (e: Exception) {

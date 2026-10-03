@@ -15,13 +15,18 @@ object AssistantBus {
     /** WAITING: oturum yok, "Aıron" bekleniyor. */
     enum class Phase { OFF, WAITING, CONNECTING, LISTENING, THINKING, SPEAKING, WORKING }
 
-    data class Line(val id: Long, val fromUser: Boolean, val text: String)
+    /** `claude`: PC'deki Claude'un sonucu/onay sorusu — sohbette ayrı balon. */
+    data class Line(val id: Long, val fromUser: Boolean, val text: String, val claude: Boolean = false)
 
     data class State(
         val phase: Phase = Phase.OFF,
         val lines: List<Line> = emptyList(),
         val activeTool: String? = null,
         val notice: String? = null,
+        /** Yazışma modu: kullanıcı klavyeyle konuşuyor — Aıron sesli cevap vermiyor, mikrofon duraklı. */
+        val typing: Boolean = false,
+        /** Süren Claude işinin canlı tek satırı ("Claude: pytest koşuyor · 2 dk"); yoksa null. */
+        val claudeStatus: String? = null,
     )
 
     private val _state = MutableStateFlow(State())
@@ -47,13 +52,16 @@ object AssistantBus {
         _micLevel.value = level
     }
 
-    fun line(fromUser: Boolean, text: String) {
+    fun line(fromUser: Boolean, text: String, claude: Boolean = false) {
         if (text.isBlank()) return
         _state.update { s ->
-            val lines = (s.lines + Line(nextId++, fromUser, text.trim())).takeLast(MAX_LINES)
+            val lines = (s.lines + Line(nextId++, fromUser, text.trim(), claude)).takeLast(MAX_LINES)
             s.copy(lines = lines)
         }
     }
+
+    fun typing(on: Boolean) = _state.update { it.copy(typing = on) }
+    fun claudeStatus(text: String?) = _state.update { it.copy(claudeStatus = text) }
 
     private const val MAX_LINES = 60
 }
