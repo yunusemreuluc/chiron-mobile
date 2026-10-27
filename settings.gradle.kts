@@ -12,5 +12,5 @@ dependencyResolutionManagement {
         mavenCentral()
     }
 }
-rootProject.name = "airon-mobile"
+rootProject.name = "chiron-mobile"
 include(":app")

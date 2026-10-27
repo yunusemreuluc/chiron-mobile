@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="whatsapp_service_description">Aıron sesli komutla WhatsApp mesajı hazırladığında gönder düğmesine basar. Yalnızca WhatsApp içinde ve yalnızca Aıron bir mesaj hazırladıktan sonraki birkaç saniye çalışır.</string>
+    <string name="whatsapp_service_description">Chiron sesli komutla WhatsApp mesajı hazırladığında gönder düğmesine basar. Yalnızca WhatsApp içinde ve yalnızca Chiron bir mesaj hazırladıktan sonraki birkaç saniye çalışır.</string>
 </resources>

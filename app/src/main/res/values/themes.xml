@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.Airon" parent="android:Theme.Material.NoActionBar">
-        <item name="android:windowBackground">@color/airon_background</item>
+    <style name="Theme.Chiron" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/chiron_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>

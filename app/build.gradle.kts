@@ -14,11 +14,11 @@ val secrets = Properties().apply {
 }
 
 android {
-    namespace = "com.airon.mobile"
+    namespace = "com.chiron.mobile"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.airon.mobile"
+        applicationId = "com.chiron.mobile"
         minSdk = 29
         targetSdk = 35
         versionCode = 1
@@ -69,7 +69,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    // "Aıron" uyandırma sözü: openWakeWord modelleri (airon-wake projesinde eğitildi).
+    // "Chiron" uyandırma sözü: openWakeWord modelleri (chiron-wake projesinde eğitildi).
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
     testImplementation("junit:junit:4.13.2")
 }
