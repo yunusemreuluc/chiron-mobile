@@ -42,6 +42,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.automirrored.rounded.Send
+import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Settings
 import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.DropdownMenuItem
@@ -155,6 +156,7 @@ private fun ChironScreen() {
     val mic by AssistantBus.micLevel.collectAsStateWithLifecycle()
     var showSettings by remember { mutableStateOf(false) }
     var showRecorder by remember { mutableStateOf(false) }
+    var showKomuta by remember { mutableStateOf(false) }
     // Ayarlardayken geri tuşu uygulamadan çıkmasın, ana ekrana dönsün.
     // (Kayıt ekranı kendi geri davranışını RecorderScreen içinde tanımlıyor.)
     BackHandler(enabled = showSettings && !showRecorder) { showSettings = false }
@@ -217,16 +219,21 @@ private fun ChironScreen() {
                     wakeOn = !wakeOn
                     AssistantService.setWake(context, wakeOn)
                 }
-                IconButton(enabled = !showRecorder, onClick = { showSettings = !showSettings }) {
+                IconButton(enabled = !showRecorder, onClick = { showSettings = false; showKomuta = !showKomuta }) {
+                    Icon(Icons.Rounded.Forum, "Komuta", tint = if (showKomuta) CoreColors.Ice else Muted)
+                }
+                IconButton(enabled = !showRecorder, onClick = { showKomuta = false; showSettings = !showSettings }) {
                     Icon(Icons.Rounded.Settings, "Ayarlar", tint = Muted)
                 }
             }
 
-            AnimatedVisibility(state.claudeStatus != null && !showSettings && !showRecorder, enter = fadeIn(), exit = fadeOut()) {
-                ClaudeStrip(state.claudeStatus.orEmpty())
+            AnimatedVisibility(state.claudeStatus != null && !showSettings && !showRecorder && !showKomuta, enter = fadeIn(), exit = fadeOut()) {
+                ClaudeStrip(state.claudeStatus.orEmpty()) { showKomuta = true }
             }
 
-            if (showRecorder) {
+            if (showKomuta) {
+                KomutaScreen(onClose = { showKomuta = false })
+            } else if (showRecorder) {
                 RecorderScreen(onClose = { showRecorder = false })
             } else if (showSettings) {
                 SettingsPanel(
@@ -303,9 +310,9 @@ private val TOOL_LABELS = mapOf(
     "get_device_health" to "Pile bakıyor",
     "query_desktop_chiron" to "PC'ye soruyor",
     "send_desktop_command" to "PC'ye komut gönderiyor",
-    "delegate_to_claude" to "Claude'a iş veriyor",
-    "claude_job_status" to "Claude'a bakıyor",
-    "cancel_claude_job" to "Claude işini durduruyor",
+    "delegate_to_claude" to "PC'de işe başlıyor",
+    "claude_job_status" to "İşe bakıyor",
+    "cancel_claude_job" to "İşi durduruyor",
     "save_quick_note" to "Not alıyor",
     "remove_feature_request" to "İsteği kaldırıyor",
     "report_bug" to "Hatayı kaydediyor",
@@ -364,12 +371,13 @@ private fun WakeToggle(on: Boolean, enabled: Boolean, onClick: () -> Unit) {
 private val ClaudeTint = Color(0xFFFFB38A)
 
 @Composable
-private fun ClaudeStrip(text: String) {
+private fun ClaudeStrip(text: String, onClick: () -> Unit) {
     Row(
         Modifier
             .fillMaxWidth()
             .padding(horizontal = 18.dp, vertical = 2.dp)
             .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
             .background(Color(0x14FFB38A))
             .border(1.dp, Color(0x33FFB38A), RoundedCornerShape(12.dp))
             .padding(horizontal = 12.dp, vertical = 8.dp),

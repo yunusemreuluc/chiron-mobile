@@ -152,6 +152,8 @@ class GeminiLiveClient(
         }
 
         val content = msg.optJSONObject("serverContent") ?: return
+        // Google Arama sonucu modele girdi: web sayfası metni de dışarıdan (bkz. UntrustedInput).
+        if (content.has("groundingMetadata")) com.chiron.mobile.tools.UntrustedInput.mark()
         content.optJSONObject("modelTurn")?.optJSONArray("parts")?.let { parts ->
             for (i in 0 until parts.length()) {
                 val inline = parts.getJSONObject(i).optJSONObject("inlineData") ?: continue

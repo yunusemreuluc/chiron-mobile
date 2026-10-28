@@ -123,16 +123,17 @@ object ToolDeclarations {
             .put(
                 fn(
                     "delegate_to_claude",
-                    "PC'deki Claude Code'a (kod yazan, dosyalarla/Etsy/Drive/projelerle çalışan yapay zeka ajanı) iş verir. " +
-                        "Uzun süren, PC'de dosya/kod/proje gerektiren işler için: 'PC'de şu projeye şunu ekle', " +
-                        "'Etsy listinglerini hazırla', 'şu klasörü düzenle'. PC ekranına bakıp cevaplanacak soru için DEĞİL " +
-                        "(onun için query_desktop_chiron). İş arka planda sürer; bitince haber gelir. İKİ AŞAMALI: draft_id olmadan çağrı " +
-                        "işi VERMEZ, taslak döner; görevi kullanıcıya okuyup onay al, sonra aynı task ve dönen draft_id ile tekrar çağır. " +
-                        "İstisna: [CLAUDE İŞİ] onay sorusuna kullanıcının cevabı — o zaman draft_id gerekmez: resume_job_id + decision ver.",
+                    "PC'de iş yapar (kod yazar, projelerde/dosyalarda/Etsy'de çalışır). Kullanıcı PC'de bir şey yapılmasını " +
+                        "isteyince HEMEN çağır: 'Dilcep'te şunu değiştir', 'Etsy listinglerini hazırla', 'şu klasörü düzenle'. " +
+                        "PC ekranına bakıp cevaplanacak soru için DEĞİL (onun için query_desktop_chiron). İş PC'deki Komuta " +
+                        "konuşmasının devamı olarak arka planda sürer; bitince haber gelir. Normalde ilk çağrıda başlar. " +
+                        "needs_confirmation dönerse görevi kullanıcıya okuyup onay al, sonra aynı task ve dönen draft_id ile tekrar çağır. " +
+                        "[CLAUDE İŞİ] onay sorusuna kullanıcının cevabı: resume_job_id + decision ver.",
                     props(
                         "task" to str("Kullanıcının istediği iş, ayrıntısıyla, tam cümle; kendi yorumunu ekleme."),
-                        "resume_job_id" to str("Yalnız önceki bir işi sürdürmek veya onay cevabı vermek için o işin job_id'si."),
-                        "draft_id" to str("Yalnızca kullanıcı taslağı AÇIKÇA onayladıktan sonra: taslak aşamasında dönen draft_id. Onay yoksa verme."),
+                        "new_topic" to bool("Önceki PC işiyle ilgisiz yeni bir konu (başka proje/iş) ise true; devam isteğinde verme."),
+                        "resume_job_id" to str("Yalnız [CLAUDE İŞİ] onay sorusuna cevap verirken o işin job_id'si."),
+                        "draft_id" to str("Yalnızca needs_confirmation döndüyse ve kullanıcı AÇIKÇA onayladıysa: dönen draft_id."),
                         "decision" to enumStr(
                             "Yalnız [CLAUDE İŞİ] onay sorusuna kullanıcının cevabı: evet → approve, hayır → reject. Bu durumda task olarak 'onay' yaz.",
                             "approve", "reject",
@@ -144,14 +145,14 @@ object ToolDeclarations {
             .put(
                 fn(
                     "claude_job_status",
-                    "PC'deki Claude işlerinin durumunu okur ('Claude ne yapıyor', 'iş bitti mi').",
+                    "PC'de süren/biten işlerin durumunu okur ('PC'deki iş ne durumda', 'iş bitti mi').",
                     props("job_id" to str("Bakılacak işin job_id'si; verilmezse son işler okunur.")),
                 ),
             )
             .put(
                 fn(
                     "cancel_claude_job",
-                    "Süren Claude işini durdurur.",
+                    "PC'de süren işi durdurur ('dur', 'iptal et').",
                     props("job_id" to str("Durdurulacak işin job_id'si.")),
                     required = listOf("job_id"),
                 ),
@@ -256,6 +257,7 @@ object ToolDeclarations {
 
     private fun str(description: String) = JSONObject().put("type", "STRING").put("description", description)
     private fun int(description: String) = JSONObject().put("type", "INTEGER").put("description", description)
+    private fun bool(description: String) = JSONObject().put("type", "BOOLEAN").put("description", description)
     private fun enumStr(description: String, vararg values: String) =
         str(description).put("enum", JSONArray(values.toList()))
 }

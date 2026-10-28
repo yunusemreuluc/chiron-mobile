@@ -27,7 +27,11 @@ class ToolExecutor(context: Context, settings: AppSettings) {
     val requests = FeatureRequests(app, settings)
 
     /** Ağ ya da bekleme içerebilir — ana iş parçacığında ÇAĞIRMA. */
-    fun execute(name: String, args: JSONObject): JSONObject = run(name, args).also { RecentCalls.record(name, args, it) }
+    fun execute(name: String, args: JSONObject): JSONObject = run(name, args).also {
+        RecentCalls.record(name, args, it)
+        // Sonucu başkasının yazdığı metni taşıyabilen araçlar (bkz. UntrustedInput).
+        if (name in UNTRUSTED_RESULTS) UntrustedInput.mark()
+    }
 
     private fun run(name: String, args: JSONObject): JSONObject = try {
         when (name) {
@@ -54,6 +58,13 @@ class ToolExecutor(context: Context, settings: AppSettings) {
     } catch (e: Exception) {
         Log.e("ChironTools", "$name başarısız", e)
         fail("$name çalışırken hata: ${e.message ?: e.javaClass.simpleName}")
+    }
+
+    private companion object {
+        val UNTRUSTED_RESULTS = setOf(
+            "get_recent_notifications", "query_desktop_chiron", "get_pc_status",
+            "claude_job_status", "list_feature_requests",
+        )
     }
 
     /**

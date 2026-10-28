@@ -28,6 +28,7 @@ import com.chiron.mobile.tools.ClaudeDrafts
 import com.chiron.mobile.tools.MessageAnnouncer
 import com.chiron.mobile.tools.MessageDrafts
 import com.chiron.mobile.tools.ToolExecutor
+import com.chiron.mobile.tools.UntrustedInput
 import com.chiron.mobile.ui.MainActivity
 import com.chiron.mobile.wake.WakeWordListener
 import org.json.JSONObject
@@ -177,6 +178,8 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             awaitingClaudeAck += claudeBatch.map { it.id }
             pendingClaude.removeAll(claudeBatch.toSet())
         }
+        // Mesaj ve PC sonucu dışarıdan gelen metin: hemen ardından iş doğrudan başlatılmasın.
+        if (parts.any { it.startsWith("[YENİ MESAJ]") || it.startsWith("[CLAUDE İŞİ]") }) UntrustedInput.mark()
         client.sendText(parts.joinToString("\n"))
         AssistantBus.phase(Phase.THINKING)
         touch()
@@ -417,11 +420,11 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
     private fun claudeBubble(job: ClaudeAnnouncement.Job): String {
         val body = job.summary.take(1500)
         return when (job.status) {
-            "done" -> "Claude · bitti\n$body"
-            "needs_approval" -> "Claude · onay bekliyor\n${job.approval.ifBlank { body }}"
-            "timeout" -> "Claude · süre doldu\n$body"
-            "interrupted" -> "Claude · yarıda kaldı\n$body"
-            else -> "Claude · tamamlanamadı\n$body"
+            "done" -> "PC'de · bitti\n$body"
+            "needs_approval" -> "PC'de · onay bekliyor\n${job.approval.ifBlank { body }}"
+            "timeout" -> "PC'de · süre doldu\n$body"
+            "interrupted" -> "PC'de · yarıda kaldı\n$body"
+            else -> "PC'de · tamamlanamadı\n$body"
         }
     }
 

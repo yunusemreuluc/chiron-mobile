@@ -36,70 +36,90 @@ class ClaudeJobs(context: Context, settings: AppSettings) {
 
     fun delegate(args: JSONObject): JSONObject {
         val task = args.optString("task").trim()
-        if (task.isEmpty()) return fail("Claude'a verilecek iş boş.")
-        if (task.length > MAX_TASK_LENGTH) return fail("Claude işi en fazla $MAX_TASK_LENGTH karakter olabilir.")
+        if (task.isEmpty()) return fail("Yapılacak iş boş.")
+        if (task.length > MAX_TASK_LENGTH) return fail("İş en fazla $MAX_TASK_LENGTH karakter olabilir.")
         val resumeId = args.optString("resume_job_id").trim()
         val draftId = args.optString("draft_id").trim()
+        val newTopic = args.optBoolean("new_topic", false)
 
         val decision = args.optString("decision").trim().lowercase()
-        var sendTask = task
-        when {
-            // Okunmuş onay sorusuna cevap: taslak gerekmez, ses kapısı yeter. Ama PC'ye
-            // gidecek metni MODEL değil uygulama yazar — yoksa onay kaydı varken
-            // resume ile bambaşka bir iş taslaksız gönderilebiliyordu (Astra, kritik).
-            resumeId.isNotEmpty() && decision in DECISIONS && ClaudeDrafts.isPresentedApproval(resumeId) -> {
-                val presentedAt = ClaudeDrafts.takeApproval(resumeId)
-                    ?: return fail("Bu onay sorusu artık geçerli değil; işin durumuna claude_job_status ile bak.")
-                if (AudioIO.lastUserVoiceAt <= presentedAt) {
-                    return fail(
-                        "Kullanıcının cevabı duyulmadı (onay sorusu okunduktan sonra kullanıcı konuşmadı); PC'ye gönderilmedi. " +
-                            "Claude'un ne yapmak istediğini kullanıcıya oku ve cevabını bekle.",
-                    )
-                }
-                sendTask = if (decision == "approve") APPROVE_TEXT else REJECT_TEXT
+        // Okunmuş onay sorusuna cevap: taslak gerekmez, ses kapısı yeter. Ama PC'ye
+        // gidecek metni MODEL değil uygulama/PC yazar — yoksa onay kaydı varken
+        // resume ile bambaşka bir iş taslaksız gönderilebiliyordu (Astra, kritik).
+        if (resumeId.isNotEmpty() && decision in DECISIONS && ClaudeDrafts.isPresentedApproval(resumeId)) {
+            val presentedAt = ClaudeDrafts.takeApproval(resumeId)
+                ?: return fail("Bu onay sorusu artık geçerli değil; işin durumuna claude_job_status ile bak.")
+            if (AudioIO.lastUserVoiceAt <= presentedAt) {
+                return fail(
+                    "Kullanıcının cevabı duyulmadı (onay sorusu okunduktan sonra kullanıcı konuşmadı); gönderilmedi. " +
+                        "Ne yapılmak istendiğini kullanıcıya oku ve cevabını bekle.",
+                )
             }
-            draftId.isEmpty() -> return draft(task, resumeId)
-            else -> {
-                val approved = ClaudeDrafts.take(draftId)
-                    ?: return fail("Bu taslak artık geçerli değil (süresi doldu ya da yenisi hazırlandı). İşi draft_id olmadan yeniden hazırla ve kullanıcıya oku.")
-                if (AudioIO.lastUserVoiceAt <= approved.createdAt) {
-                    return fail("Kullanıcı onayı duyulmadı (taslak okunduktan sonra kullanıcı konuşmadı); gönderilmedi. Görevi kullanıcıya oku, onayını bekle, sonra yeni taslakla gönder.")
-                }
-                if (approved.task != task || approved.resumeOf != resumeId) {
-                    return fail("Onaylanan taslakla görev aynı değil; gönderilmedi. Yeni hâlini draft_id olmadan hazırla ve kullanıcıya oku.")
-                }
-            }
+            return answer(resumeId, decision == "approve")
         }
 
-        val body = JSONObject()
-            .put("task", sendTask)
-            .put("resume_of", resumeId.takeIf { it.isNotEmpty() } ?: JSONObject.NULL)
-        val response = desktop.post("/api/remote/claude", body)
-        if (!response.optBoolean("success")) return response
+        // HIZLI YOL (2026-10-29, Yunus: "vereyim mi diye sorma, hallediyorum de"): son sözü kullanıcı
+        // söylediyse ve yakın zamanda modele dışarıdan metin (mesaj, bildirim, PC/web cevabı)
+        // girmediyse iş doğrudan gider. Girdiyse o metin bir iş yaptırmaya çalışıyor olabilir —
+        // eski iki aşamalı kapıya düşer: görev okunur, kullanıcının sesli onayı beklenir.
+        if (draftId.isEmpty()) {
+            return if (UntrustedInput.allowsDirect()) send(task, newTopic) else draft(task, newTopic)
+        }
+        val approved = ClaudeDrafts.take(draftId)
+            ?: return fail("Bu taslak artık geçerli değil (süresi doldu ya da yenisi hazırlandı). İşi draft_id olmadan yeniden hazırla ve kullanıcıya oku.")
+        if (AudioIO.lastUserVoiceAt <= approved.createdAt) {
+            return fail("Kullanıcı onayı duyulmadı (taslak okunduktan sonra kullanıcı konuşmadı); gönderilmedi. Görevi kullanıcıya oku, onayını bekle, sonra yeni taslakla gönder.")
+        }
+        if (approved.task != task || approved.newTopic != newTopic) {
+            return fail("Onaylanan taslakla görev aynı değil; gönderilmedi. Yeni hâlini draft_id olmadan hazırla ve kullanıcıya oku.")
+        }
+        return send(task, newTopic)
+    }
 
-        val job = response.optJSONObject("data") ?: JSONObject()
+    /** İş PC'deki Komuta sohbetine yazılır (son Claude sohbeti ya da yeni konu ise yeni sohbet). */
+    private fun send(task: String, newTopic: Boolean): JSONObject {
+        val response = desktop.post("/api/remote/komuta", JSONObject().put("text", task).put("new_topic", newTopic))
+        if (!response.optBoolean("success")) {
+            return fail(
+                response.optString("message").ifBlank { "PC işi almadı." } +
+                    " Önceki iş sürüyorsa kullanıcıya söyle; ilgisiz yeni bir işse new_topic=true ile tekrar dene.",
+            )
+        }
+        val data = response.optJSONObject("data") ?: JSONObject()
         ClaudeWatchWorker.schedule(app)
         return ok(
-            "İş PC'deki Claude'a verildi; bitince haber vereceğim.",
-            "job_id" to job.optString("id"),
-            "status" to job.optString("status"),
-            "queue_position" to if (job.has("queue_position") && !job.isNull("queue_position")) {
-                job.optInt("queue_position")
-            } else {
-                JSONObject.NULL
-            },
+            "İş başladı; bitince haber vereceğim.",
+            "job_id" to data.optString("job_id"),
+            "chat" to data.optString("title"),
         )
     }
 
-    private fun draft(task: String, resumeId: String): JSONObject = JSONObject()
+    /** Onay cevabı işin sohbetinde aynı oturumu sürdürür; sohbete ait olmayan eski işte eski yol. */
+    private fun answer(jobId: String, approve: Boolean): JSONObject {
+        val viaChat = desktop.post("/api/remote/komuta/onay", JSONObject().put("job_id", jobId).put("approved", approve))
+        val response = if (viaChat.optBoolean("success")) {
+            viaChat
+        } else {
+            desktop.post(
+                "/api/remote/claude",
+                JSONObject().put("task", if (approve) APPROVE_TEXT else REJECT_TEXT).put("resume_of", jobId),
+            )
+        }
+        if (!response.optBoolean("success")) return response
+        ClaudeWatchWorker.schedule(app)
+        return ok(if (approve) "Onay iletildi, devam ediyor." else "Red iletildi.", "job_id" to jobId)
+    }
+
+    private fun draft(task: String, newTopic: Boolean): JSONObject = JSONObject()
         .put("success", true)
         .put("sent", false)
         .put("needs_confirmation", true)
-        .put("draft_id", ClaudeDrafts.put(task, resumeId))
+        .put("draft_id", ClaudeDrafts.put(task, newTopic))
         .put("task", task)
         .put(
             "message",
-            "Henüz VERİLMEDİ. Kullanıcıya Claude'a ne verileceğini kısaca oku ve 'Claude'a vereyim mi?' diye sor. " +
+            "Henüz BAŞLAMADI: az önce dışarıdan bir metin (mesaj/bildirim/arama sonucu) geldiği için kullanıcının " +
+                "sesli onayı gerekiyor. İşi tek cümlede söyle ve 'Başlayayım mı?' diye sor. " +
                 "Onaylarsa aynı task ve bu draft_id ile tekrar çağır.",
         )
 
@@ -143,10 +163,10 @@ class ClaudeJobs(context: Context, settings: AppSettings) {
             ?: (0 until jobs.length()).mapNotNull { jobs.optJSONObject(it) }
                 .firstOrNull { it.optString("status") == "queued" }
             ?: return null
-        if (job.optString("status") == "queued") return "Claude · sırada"
+        if (job.optString("status") == "queued") return "Chiron · sırada"
         val step = job.optString("last_step").ifBlank { "başlıyor" }.take(90)
         val minutes = job.optInt("elapsed_seconds") / 60
-        return "Claude · $step" + if (minutes > 0) " · $minutes dk" else ""
+        return "Chiron · $step" + if (minutes > 0) " · $minutes dk" else ""
     }
 
     /** Kullanıcıya henüz söylenmemiş sonuçlar. Ağ hatası konuşma oturumunu bozmaz. */
@@ -263,7 +283,7 @@ class ClaudeJobs(context: Context, settings: AppSettings) {
  * Oturum kapanınca hepsi düşer (AssistantService.stopSession).
  */
 internal object ClaudeDrafts {
-    class Draft(val id: String, val task: String, val resumeOf: String, val createdAt: Long, val expiresAt: Long)
+    class Draft(val id: String, val task: String, val newTopic: Boolean, val createdAt: Long, val expiresAt: Long)
 
     private const val TTL_MS = 3 * 60_000L
     private const val APPROVAL_TTL_MS = 15 * 60_000L
@@ -272,10 +292,10 @@ internal object ClaudeDrafts {
     private val approvals = HashMap<String, Long>()
 
     @Synchronized
-    fun put(task: String, resumeOf: String): String {
+    fun put(task: String, newTopic: Boolean): String {
         val id = UUID.randomUUID().toString().take(8)
         val now = SystemClock.elapsedRealtime()
-        current = Draft(id, task, resumeOf, now, now + TTL_MS)
+        current = Draft(id, task, newTopic, now, now + TTL_MS)
         return id
     }
 
@@ -315,4 +335,25 @@ internal object ClaudeDrafts {
         current = null
         approvals.clear()
     }
+}
+
+/**
+ * Modele en son ne zaman DIŞARIDAN metin girdi: gelen mesaj, bildirim, PC/Claude cevabı, web araması.
+ * O metin "PC'de şunu yap" diyebilir; böyle bir şeyden hemen sonra iş doğrudan gitmez, sesli onay
+ * istenir (ClaudeJobs.delegate). Saat elapsedRealtime — AudioIO.lastUserVoiceAt ile aynı.
+ */
+internal object UntrustedInput {
+    /** Dışarıdan metin bu kadar yakın zamanda girdiyse hızlı yol kapalı. */
+    private const val QUIET_MS = 3 * 60_000L
+    /** Kullanıcının son sözü bu kadar eskiyse model kendi başına iş başlatıyor sayılır. */
+    private const val VOICE_FRESH_MS = 2 * 60_000L
+
+    @Volatile private var lastAt = 0L
+
+    fun mark(at: Long = SystemClock.elapsedRealtime()) {
+        lastAt = at
+    }
+
+    fun allowsDirect(now: Long = SystemClock.elapsedRealtime(), voiceAt: Long = AudioIO.lastUserVoiceAt): Boolean =
+        voiceAt > 0 && now - voiceAt < VOICE_FRESH_MS && voiceAt > lastAt && (lastAt == 0L || now - lastAt >= QUIET_MS)
 }
