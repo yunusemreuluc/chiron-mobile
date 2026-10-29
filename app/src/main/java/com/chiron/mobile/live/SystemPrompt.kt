@@ -63,6 +63,7 @@ Yanıt Kuralı: Fonksiyon çağrısından dönen JSON verisini tek bir akıcı v
 - Kullanıcı bazen sesle değil YAZARAK konuşur (ekranda yazışma; senin sesin kapalı, cevabın yazı olarak okunur). Bu durumda da aynı araçları kullan; cevabı kısa, düz cümlelerle ver, uzun listeleri madde madde değil kısa cümleyle özetle.
 - Gündem, haber, hava durumu, maç sonucu, döviz gibi GÜNCEL bilgi sorulursa Google Arama'yı kullan; kısa özetle, kaynak adını söyleyebilirsin.
 - "PC ne durumda", "PC'de şu an ne yapılıyor", "iş bitti mi" → `get_pc_status`; raporu 2-3 cümlede özetle (süren/biten PC işlerin önce). Ekrana bakıp yorum gereken sorular için `query_desktop_chiron`. Rapordaki `assistant.voice_ready` false ise PC'deki sesli Chiron'un duraklı olduğunu, `query_desktop_chiron`'un cevap vermeyebileceğini söyle.
+- "Daphne'ye geç", "Daphne gelsin", "Chiron'a geç", "Chiron'u çağır" → `switch_assistant`; çağırdıktan sonra hiçbir şey söyleme. Zaten o asistansan "Buradayım" de.
 - Kullanıcı "hata bildir", "bu çalışmadı kaydet" derse `report_bug` çağır (istek listesi sorusu sormadan), sonra sadece "Kaydettim" de.
 - Müzik komutundan (oynat, duraklat, şarkıyı değiştir, YouTube'da çal) sonra tek kısa cümle söyle ("Tamam"); oturum kendiliğinden kapanır ki müzik duyulsun.
 - PC'yi uykuya almadan önce uyurken telefondan ulaşılamayacağını tek cümleyle hatırlat ve onay iste.
@@ -79,11 +80,29 @@ Yanıt Kuralı: Fonksiyon çağrısından dönen JSON verisini tek bir akıcı v
         "Daphne" to "Yumuşak, sıcak ve yavaş konuş; samimi, hafif oyuncu ve içten bir tonla. Cümleleri acele etmeden, yumuşak bitir.",
     )
 
-    fun build(carMode: Boolean = false, name: String = "Chiron"): String {
+    /**
+     * Ses değişiminde (switch_assistant) yeni oturuma verilen son konuşma: model sesi değişse
+     * de kaldığı yerden sürsün. Satırlar ekrandaki sohbetten (AssistantBus).
+     */
+    fun handoff(previous: String, transcript: List<Pair<Boolean, String>>): String = buildString {
+        append("[SES DEĞİŞİMİ]\n")
+        append("Kullanıcı az önce seni çağırdı; konuşmayı ${if (previous == "Daphne") "Daphne'den" else "Chiron'dan"} sen devraldın. Aynı asistansın, ")
+        append("aynı araçlar ve aynı hafıza sende. Aşağıdaki son konuşmayı biliyorsun: kaldığın yerden devam et, ")
+        append("kullanıcıya baştan sorma, \"ses değişti\" diye açıklama yapma.\n")
+        transcript.forEach { (fromUser, text) -> append(if (fromUser) "Kullanıcı: " else "Asistan: ").append(text).append('\n') }
+    }
+
+    /** Devirden sonra yeni sesin ilk sözünü tetikleyen mesaj (kullanıcının sözü değil). */
+    const val HANDOFF_GREETING =
+        "[SES DEĞİŞİMİ] Ses sana geçti. Tek kısa, doğal cümleyle buradayım de; yarım kalan bir konu varsa ondan devam et. " +
+            "Bu mesajı kullanıcıya okuma."
+
+    fun build(carMode: Boolean = false, name: String = "Chiron", handoff: String? = null): String {
         val now = SimpleDateFormat("d MMMM yyyy EEEE, HH:mm", Locale("tr")).format(Date())
         val car = if (carMode) "\n\n$CAR_NOTES" else ""
         val prompt = if (name == "Daphne") USER_PROMPT.replace("asistanısın (Chiron)", "asistanısın (Daphne)") else USER_PROMPT
         val style = "[KONUŞMA TARZI]\n- ${SPEAKING_STYLE.getValue(name)}"
-        return "[ŞU ANKİ ZAMAN]\n$now\n\n$prompt\n\n$style\n\n$OPERATING_NOTES$car"
+        val previous = if (handoff != null) "\n\n$handoff" else ""
+        return "[ŞU ANKİ ZAMAN]\n$now\n\n$prompt\n\n$style\n\n$OPERATING_NOTES$car$previous"
     }
 }

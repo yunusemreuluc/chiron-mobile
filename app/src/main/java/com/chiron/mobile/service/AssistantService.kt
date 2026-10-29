@@ -74,6 +74,10 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
     private val turnAudio = ArrayDeque<ByteArray>()
     private var turnAudioBytes = 0
     private val transcribeThread = Executors.newSingleThreadExecutor()
+    /** switch_assistant: bu tur bitince yeni sesle yeniden bağlanılacak (önceki asistanın adı). */
+    private var switchFrom: String? = null
+    /** Sonraki oturumun sistem komutuna eklenecek son konuşma; oturum açılınca selam tetiklenir. */
+    private var handoffNote: String? = null
     /** Bu oturum "Chiron" sözüyle mi açıldı — söz sonrası ses Gemini'ye aktarılacak mı. */
     private var wakeTriggered = false
     /** Araba modunda okunmayı bekleyen gelen mesajlar (oturum hazır ve dinlerken iletilir). */
@@ -290,7 +294,7 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             it.playbackMuted = typedMode
         }
         live = GeminiLiveClient(key, this).also {
-            it.connect(MODEL, settings.voice, SystemPrompt.build(settings.carMode, settings.assistantName), ToolDeclarations.all)
+            it.connect(MODEL, settings.voice, SystemPrompt.build(settings.carMode, settings.assistantName, handoffNote), ToolDeclarations.all)
         }
     }
 
@@ -304,6 +308,8 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         awaitingClaudeAck.clear()
         announcingApproval = null
         endAfterTurn = false
+        switchFrom = null
+        handoffNote = null
         pendingTyped.clear()
         takeTurnAudio() // kapanan oturumun sesi sonraki tura karışmasın
         liveReady = false
@@ -367,7 +373,12 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             liveReady = true
             AssistantBus.phase(Phase.LISTENING)
             touch()
-            if (pendingTyped.isNotEmpty()) {
+            if (handoffNote != null) {
+                handoffNote = null
+                // Yeni ses ilk sözü kendisi söylesin; bu metin sohbet ekranına yazılmaz.
+                live?.sendText(SystemPrompt.HANDOFF_GREETING)
+                AssistantBus.phase(Phase.THINKING)
+            } else if (pendingTyped.isNotEmpty()) {
                 val typed = pendingTyped.joinToString("\n")
                 pendingTyped.clear()
                 sendTyped(typed)
@@ -524,6 +535,13 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
                     // "onaylıyorum"u PC'ye geçirebilir (ClaudeJobs ses kapısı).
                     announcingApproval?.let { ClaudeDrafts.presentApproval(it) }
                     announcingApproval = null
+                    switchFrom?.let { previous ->
+                        if (runningTools.get() == 0) {
+                            switchFrom = null
+                            handoff(previous)
+                            return
+                        }
+                    }
                     if (endAfterTurn && runningTools.get() == 0) {
                         endAfterTurn = false
                         stopSession(null) // müzik duyulsun: ses odağı bırakılır
@@ -535,6 +553,63 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             }
         })
         main.post(::touch)
+    }
+
+    /**
+     * "Daphne'ye geç" (2026-10-30): Live oturumun sesi bağlantı sırasında sabit, o yüzden
+     * tur bitince yeni sesle yeniden bağlanılıyor; son konuşma yeni oturumun sistem
+     * komutuna veriliyor, yeni ses ilk sözü kendisi söylüyor.
+     */
+    private fun switchAssistant(id: String, target: String) {
+        val client = live ?: return
+        val name = if (target == "Daphne") "Daphne" else "Chiron"
+        val previous = settings.assistantName
+        if (previous == name) {
+            client.sendToolResponse(id, "switch_assistant", JSONObject().put("success", true).put("message", "Zaten $name konuşuyor."))
+            return
+        }
+        settings.voice = settings.voiceFor(name)
+        switchFrom = previous
+        client.sendToolResponse(
+            id, "switch_assistant",
+            JSONObject().put("success", true).put("message", "Ses ${if (name == "Daphne") "Daphne'ye" else "Chiron'a"} geçiyor. Hiçbir şey söyleme, tur bitsin."),
+        )
+        // Model turu bitirmezse de geçilsin.
+        val gen = generation
+        main.postDelayed({
+            val from = switchFrom
+            if (gen == generation && from != null && audio?.isSpeaking != true) {
+                switchFrom = null
+                handoff(from)
+            }
+        }, SWITCH_FALLBACK_MS)
+    }
+
+    private fun handoff(previous: String) {
+        if (live == null || destroyed) return
+        val transcript = AssistantBus.state.value.lines
+            .filter { !it.claude }
+            .takeLast(HANDOFF_LINES)
+            .map { it.fromUser to it.text.take(500) }
+        val keepTyped = typedMode
+        generation++ // eski oturumun geç gelen geri çağrıları yeni oturuma dokunmasın
+        liveReady = false
+        live?.close()
+        live = null
+        audio?.stop()
+        audio = null
+        takeTurnAudio()
+        synchronized(inBuf) { inBuf.clear() }
+        synchronized(outBuf) { outBuf.clear() }
+        handoffNote = SystemPrompt.handoff(previous, transcript)
+        AssistantBus.phase(Phase.CONNECTING)
+        val gen = generation
+        main.postDelayed({
+            if (gen == generation && live == null && !destroyed) {
+                typedMode = keepTyped
+                startSession()
+            }
+        }, MIC_RELEASE_MS)
     }
 
     /** Mikrofon iş parçacığından çağrılıyor. */
@@ -572,6 +647,10 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         // Kullanıcının söylediği o ana kadar yazılsın: araç sonucu gelmeden sohbette görünsün.
         val heard = synchronized(inBuf) { inBuf.toString().also { inBuf.clear() } }
         AssistantBus.line(fromUser = true, text = heard)
+        if (name == "switch_assistant") {
+            main.post { switchAssistant(id, args.optString("name")) }
+            return
+        }
         val gen = generation
         runningTools.incrementAndGet()
         AssistantBus.tool(name)
@@ -660,6 +739,8 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         private val MEDIA_ACTIONS = setOf("media_play_pause", "media_next", "media_previous", "unmute")
         private const val MAX_TYPED_CHARS = 4000
         private const val MIC_RELEASE_MS = 400L
+        private const val SWITCH_FALLBACK_MS = 6_000L
+        private const val HANDOFF_LINES = 16
         private const val MAX_PENDING_MESSAGES = 5
         private const val USER_QUIET_MS = 1500L
 

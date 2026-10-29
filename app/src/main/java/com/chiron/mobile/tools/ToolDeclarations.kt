@@ -233,6 +233,15 @@ object ToolDeclarations {
             )
             .put(
                 fn(
+                    "switch_assistant",
+                    "Konuşan sesi değiştirir: 'Daphne'ye geç', 'Daphne gelsin', 'Chiron'a geç'. Konuşma kaldığı yerden " +
+                        "yeni sesle sürer, bağlam kaybolmaz. Çağırdıktan sonra HİÇBİR ŞEY SÖYLEME, yeni ses kendisi konuşacak.",
+                    props("name" to enumStr("Geçilecek asistan.", "Chiron", "Daphne")),
+                    required = listOf("name"),
+                ),
+            )
+            .put(
+                fn(
                     "save_quick_note",
                     "Hızlı not alır ('bunu not et', 'aklıma geldi yaz'). Telefona kaydeder, PC'ye ulaşılabiliyorsa oraya da yazar.",
                     props("text" to str("Notun metni.")),

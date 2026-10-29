@@ -40,6 +40,13 @@ class AppSettings(context: Context) {
     val assistantName: String
         get() = if (voice in FEMALE_VOICES) "Daphne" else "Chiron"
 
+    /** Asistana geçilince kullanılacak ses: şu anki ses zaten onunsa (yedek ses dahil) aynen kalır. */
+    fun voiceFor(name: String): String = when {
+        assistantName == name -> voice
+        name == "Daphne" -> "Achernar"
+        else -> "Algieba"
+    }
+
     /** Chiron'un konuşma sesi, telefonun ses düzeyine göre 0..1 kısma. */
     var voiceVolume: Float
         get() = prefs.getFloat(KEY_VOICE_VOLUME, 0.6f)
