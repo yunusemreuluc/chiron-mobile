@@ -76,6 +76,13 @@ class ClaudeJobs(context: Context, settings: AppSettings) {
         return send(task, newTopic)
     }
 
+    /** PC'deki süren iş, sesli oturumun sistem komutu için (boş: yok); PC'ye ulaşılamazsa null. */
+    fun workContext(): String? {
+        val response = desktop.get("/api/remote/komuta/baglam")
+        if (!response.optBoolean("success")) return null
+        return response.optJSONObject("data")?.optString("metin").orEmpty()
+    }
+
     /** İş PC'deki Komuta sohbetine yazılır (son Claude sohbeti ya da yeni konu ise yeni sohbet). */
     private fun send(task: String, newTopic: Boolean): JSONObject {
         val response = desktop.post("/api/remote/komuta", JSONObject().put("text", task).put("new_topic", newTopic))

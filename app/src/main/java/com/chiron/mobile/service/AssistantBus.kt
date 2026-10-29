@@ -69,6 +69,11 @@ object AssistantBus {
         s.copy(lines = s.lines.map { if (it.id == id) it.copy(text = text.trim()) else it })
     }
 
+    /** Uygulama yeniden açılınca kayıtlı son konuşma ekrana döner (bkz. ConversationMemory). */
+    fun restore(lines: List<Pair<Boolean, String>>) = _state.update { s ->
+        if (s.lines.isNotEmpty()) s else s.copy(lines = lines.map { (fromUser, text) -> Line(nextId++, fromUser, text) })
+    }
+
     fun typing(on: Boolean) = _state.update { it.copy(typing = on) }
     fun claudeStatus(text: String?) = _state.update { it.copy(claudeStatus = text) }
 

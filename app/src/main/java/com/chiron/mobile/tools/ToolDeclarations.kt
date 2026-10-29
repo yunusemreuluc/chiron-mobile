@@ -131,7 +131,7 @@ object ToolDeclarations {
                         "[CLAUDE İŞİ] onay sorusuna kullanıcının cevabı: resume_job_id + decision ver.",
                     props(
                         "task" to str("Kullanıcının istediği iş, ayrıntısıyla, tam cümle; kendi yorumunu ekleme."),
-                        "new_topic" to bool("Önceki PC işiyle ilgisiz yeni bir konu (başka proje/iş) ise true; devam isteğinde verme."),
+                        "new_topic" to bool("Önceki PC işiyle ilgisiz yeni bir konu (başka proje/iş) ise true; devam isteğinde ve proje adı söylenmeyen işte verme ([SÜREN İŞ])."),
                         "resume_job_id" to str("Yalnız [CLAUDE İŞİ] onay sorusuna cevap verirken o işin job_id'si."),
                         "draft_id" to str("Yalnızca needs_confirmation döndüyse ve kullanıcı AÇIKÇA onayladıysa: dönen draft_id."),
                         "decision" to enumStr(

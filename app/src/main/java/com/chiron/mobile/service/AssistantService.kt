@@ -78,6 +78,7 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
     private var switchFrom: String? = null
     /** Sonraki oturumun sistem komutuna eklenecek son konuşma; oturum açılınca selam tetiklenir. */
     private var handoffNote: String? = null
+    private lateinit var memory: ConversationMemory
     /** Bu oturum "Chiron" sözüyle mi açıldı — söz sonrası ses Gemini'ye aktarılacak mı. */
     private var wakeTriggered = false
     /** Araba modunda okunmayı bekleyen gelen mesajlar (oturum hazır ve dinlerken iletilir). */
@@ -122,6 +123,15 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         AudioIO.volume = settings.voiceVolume
         tools = ToolExecutor(this, settings)
         MessageAnnouncer.listener = announcer
+        memory = ConversationMemory(this)
+        AssistantBus.restore(memory.load())
+        refreshWorkContext()
+    }
+
+    /** Süren PC işini arka planda tazeler; sonraki oturum açılışı beklemesin. */
+    private fun refreshWorkContext() {
+        if (destroyed) return
+        syncThread.execute { tools.claude.workContext()?.let { memory.workContext = it } }
     }
 
     /**
@@ -294,7 +304,11 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             it.playbackMuted = typedMode
         }
         live = GeminiLiveClient(key, this).also {
-            it.connect(MODEL, settings.voice, SystemPrompt.build(settings.carMode, settings.assistantName, handoffNote), ToolDeclarations.all)
+            it.connect(MODEL, settings.voice, SystemPrompt.build(
+                    settings.carMode, settings.assistantName, handoffNote,
+                    // Ses değişiminde son konuşma zaten devir notunda; süren iş ikisine de girer.
+                    if (handoffNote != null) memory.workContext.ifBlank { null } else memory.prompt(),
+                ), ToolDeclarations.all)
         }
     }
 
@@ -310,6 +324,7 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         endAfterTurn = false
         switchFrom = null
         handoffNote = null
+        refreshWorkContext()
         pendingTyped.clear()
         takeTurnAudio() // kapanan oturumun sesi sonraki tura karışmasın
         liveReady = false
@@ -510,11 +525,15 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         val pcm = takeTurnAudio()
         val heardId = AssistantBus.line(fromUser = true, text = heard)
         AssistantBus.line(fromUser = false, text = said)
+        memory.save(AssistantBus.state.value.lines)
         // Ekrandaki hızlı yazı zayıf tanıyıcıdan; düzgün halini getirip yerine koy.
         val key = settings.geminiKey
         if (heardId != null && pcm.size >= MIN_TRANSCRIBE_BYTES && key.isNotBlank()) {
             transcribeThread.execute {
-                Transcriber(key).transcribe(pcm, said)?.let { AssistantBus.replaceText(heardId, it) }
+                Transcriber(key).transcribe(pcm, said)?.let {
+                    AssistantBus.replaceText(heardId, it)
+                    memory.save(AssistantBus.state.value.lines)
+                }
             }
         }
         // Çalma kuyruğu bitene kadar "konuşuyor" — sonra dinlemeye dön.

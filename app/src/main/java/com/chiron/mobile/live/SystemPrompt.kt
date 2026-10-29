@@ -97,12 +97,12 @@ Yanıt Kuralı: Fonksiyon çağrısından dönen JSON verisini tek bir akıcı v
         "[SES DEĞİŞİMİ] Ses sana geçti. Tek kısa, doğal cümleyle buradayım de; yarım kalan bir konu varsa ondan devam et. " +
             "Bu mesajı kullanıcıya okuma."
 
-    fun build(carMode: Boolean = false, name: String = "Chiron", handoff: String? = null): String {
+    fun build(carMode: Boolean = false, name: String = "Chiron", handoff: String? = null, memory: String? = null): String {
         val now = SimpleDateFormat("d MMMM yyyy EEEE, HH:mm", Locale("tr")).format(Date())
         val car = if (carMode) "\n\n$CAR_NOTES" else ""
         val prompt = if (name == "Daphne") USER_PROMPT.replace("asistanısın (Chiron)", "asistanısın (Daphne)") else USER_PROMPT
         val style = "[KONUŞMA TARZI]\n- ${SPEAKING_STYLE.getValue(name)}"
-        val previous = if (handoff != null) "\n\n$handoff" else ""
+        val previous = listOfNotNull(handoff, memory).joinToString("") { "\n\n$it" }
         return "[ŞU ANKİ ZAMAN]\n$now\n\n$prompt\n\n$style\n\n$OPERATING_NOTES$car$previous"
     }
 }
