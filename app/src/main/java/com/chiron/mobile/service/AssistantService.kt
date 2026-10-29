@@ -20,6 +20,7 @@ import com.chiron.mobile.BuildConfig
 import com.chiron.mobile.audio.AudioIO
 import com.chiron.mobile.audio.CarAudio
 import com.chiron.mobile.live.GeminiLiveClient
+import com.chiron.mobile.live.Transcriber
 import com.chiron.mobile.live.SystemPrompt
 import com.chiron.mobile.service.AssistantBus.Phase
 import com.chiron.mobile.tools.ToolDeclarations
@@ -66,6 +67,13 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
     private val runningTools = java.util.concurrent.atomic.AtomicInteger(0)
     private val outBuf = StringBuilder()
     private val inBuf = StringBuilder()
+    /**
+     * Turun mikrofon sesi (Chiron konuşurken gelenler hariç) — tur bitince düzgün yazıya
+     * çevriliyor (bkz. live.Transcriber). Son [TURN_AUDIO_MAX] bayt tutulur.
+     */
+    private val turnAudio = ArrayDeque<ByteArray>()
+    private var turnAudioBytes = 0
+    private val transcribeThread = Executors.newSingleThreadExecutor()
     /** Bu oturum "Chiron" sözüyle mi açıldı — söz sonrası ses Gemini'ye aktarılacak mı. */
     private var wakeTriggered = false
     /** Araba modunda okunmayı bekleyen gelen mesajlar (oturum hazır ve dinlerken iletilir). */
@@ -271,7 +279,10 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
 
         audio = AudioIO(
             this,
-            onMicFrame = { frame, length -> live?.sendAudio(frame, length) },
+            onMicFrame = { frame, length ->
+                live?.sendAudio(frame, length)
+                keepTurnAudio(frame, length)
+            },
             onMicLevel = AssistantBus::micLevel,
         ).also {
             // Mikrofon başlamadan ÖNCE: yazılı mesajla açılan oturumda tek kare bile sayılmasın.
@@ -294,6 +305,7 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         announcingApproval = null
         endAfterTurn = false
         pendingTyped.clear()
+        takeTurnAudio() // kapanan oturumun sesi sonraki tura karışmasın
         liveReady = false
         typedMode = false
         AssistantBus.typing(false)
@@ -347,7 +359,10 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             // Yazışma moduna geçildiyse uyandırma tamponundaki ortam sesi Gemini'ye gitmez.
             val heldAudio = wake?.handOff(keepAudio = wakeTriggered && !typedMode).orEmpty()
             wake = null
-            heldAudio.forEach { live?.sendAudio(it, it.size) }
+            heldAudio.forEach {
+                live?.sendAudio(it, it.size)
+                keepTurnAudio(it, it.size)
+            }
             audio?.start()
             liveReady = true
             AssistantBus.phase(Phase.LISTENING)
@@ -481,8 +496,16 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         }
         val heard = synchronized(inBuf) { inBuf.toString().also { inBuf.clear() } }
         val said = synchronized(outBuf) { outBuf.toString().also { outBuf.clear() } }
-        AssistantBus.line(fromUser = true, text = heard)
+        val pcm = takeTurnAudio()
+        val heardId = AssistantBus.line(fromUser = true, text = heard)
         AssistantBus.line(fromUser = false, text = said)
+        // Ekrandaki hızlı yazı zayıf tanıyıcıdan; düzgün halini getirip yerine koy.
+        val key = settings.geminiKey
+        if (heardId != null && pcm.size >= MIN_TRANSCRIBE_BYTES && key.isNotBlank()) {
+            transcribeThread.execute {
+                Transcriber(key).transcribe(pcm, said)?.let { AssistantBus.replaceText(heardId, it) }
+            }
+        }
         // Çalma kuyruğu bitene kadar "konuşuyor" — sonra dinlemeye dön.
         main.post(object : Runnable {
             override fun run() {
@@ -512,6 +535,26 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             }
         })
         main.post(::touch)
+    }
+
+    /** Mikrofon iş parçacığından çağrılıyor. */
+    private fun keepTurnAudio(frame: ByteArray, length: Int) {
+        if (AssistantBus.state.value.phase == Phase.SPEAKING) return
+        synchronized(turnAudio) {
+            turnAudio.addLast(frame.copyOf(length))
+            turnAudioBytes += length
+            while (turnAudioBytes > TURN_AUDIO_MAX && turnAudio.size > 1) {
+                turnAudioBytes -= turnAudio.removeFirst().size
+            }
+        }
+    }
+
+    private fun takeTurnAudio(): ByteArray = synchronized(turnAudio) {
+        val out = java.io.ByteArrayOutputStream(turnAudioBytes)
+        turnAudio.forEach { out.write(it) }
+        turnAudio.clear()
+        turnAudioBytes = 0
+        out.toByteArray()
     }
 
     override fun onInterrupted() {
@@ -557,6 +600,7 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
         stopSession(null)
         toolThread.shutdownNow()
         syncThread.shutdown()
+        transcribeThread.shutdown()
         modelLoader.shutdownNow()
         super.onDestroy()
     }
@@ -598,6 +642,9 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
     companion object {
         /** PC'deki Chiron'la aynı model (main.py LIVE_MODEL). */
         const val MODEL = "models/gemini-2.5-flash-native-audio-latest"
+        /** 16 kHz mono 16-bit: saniyede 32 000 bayt. */
+        private const val TURN_AUDIO_MAX = 32_000 * 45
+        private const val MIN_TRANSCRIBE_BYTES = 32_000 / 3
         private const val CHANNEL = "chiron_session"
         private const val NOTIFICATION_ID = 7
         private const val ACTION_STOP = "com.chiron.mobile.STOP"

@@ -52,12 +52,21 @@ object AssistantBus {
         _micLevel.value = level
     }
 
-    fun line(fromUser: Boolean, text: String, claude: Boolean = false) {
-        if (text.isBlank()) return
+    /** Eklenen satırın id'si; boş metinde null. */
+    fun line(fromUser: Boolean, text: String, claude: Boolean = false): Long? {
+        if (text.isBlank()) return null
+        var id = 0L
         _state.update { s ->
-            val lines = (s.lines + Line(nextId++, fromUser, text.trim(), claude)).takeLast(MAX_LINES)
+            id = nextId++
+            val lines = (s.lines + Line(id, fromUser, text.trim(), claude)).takeLast(MAX_LINES)
             s.copy(lines = lines)
         }
+        return id
+    }
+
+    /** Satırın metnini değiştirir (düzeltilmiş yazı, bkz. live.Transcriber); satır düştüyse bir şey yapmaz. */
+    fun replaceText(id: Long, text: String) = _state.update { s ->
+        s.copy(lines = s.lines.map { if (it.id == id) it.copy(text = text.trim()) else it })
     }
 
     fun typing(on: Boolean) = _state.update { it.copy(typing = on) }
