@@ -56,6 +56,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import com.chiron.mobile.AppSettings
+import com.chiron.mobile.tools.ApkInbox
+import com.chiron.mobile.tools.ClaudeWatchWorker
 import com.chiron.mobile.tools.DesktopBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -132,7 +134,10 @@ private fun Header(title: String, subtitle: String, onBack: () -> Unit, action: 
 
 @Composable
 private fun ChatList(api: KomutaApi, onOpen: (String) -> Unit, onClose: () -> Unit) {
+    val context = LocalContext.current
     var chats by remember { mutableStateOf<List<JSONObject>?>(null) }
+    var apk by remember { mutableStateOf<ApkInbox.Item?>(null) }
+    var apkStatus by remember { mutableStateOf<String?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -142,6 +147,9 @@ private fun ChatList(api: KomutaApi, onOpen: (String) -> Unit, onClose: () -> Un
                 val (list, err) = withContext(Dispatchers.IO) { api.list() }
                 if (list != null) chats = list
                 error = err
+                // Son 3 günde gönderilen en yeni APK, kartı listenin başında.
+                apk = withContext(Dispatchers.IO) { ApkInbox.list(context) }?.firstOrNull()
+                    ?.takeIf { System.currentTimeMillis() / 1000.0 - it.created < 3 * 86_400 }
                 delay(if (list.orEmpty().any { it.optBoolean("busy") }) 2_000L else 8_000L)
             }
         }
@@ -157,6 +165,15 @@ private fun ChatList(api: KomutaApi, onOpen: (String) -> Unit, onClose: () -> Un
             }) { Icon(Icons.Rounded.Add, "Yeni sohbet", tint = CoreColors.Ice) }
         }
         error?.let { Text(it, color = Danger, fontSize = 13.sp, modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) }
+        apk?.let { item ->
+            ApkCard(item, apkStatus) {
+                apkStatus = "İndiriliyor…"
+                scope.launch {
+                    val err = withContext(Dispatchers.IO) { ApkInbox.ensureDownloaded(context, item) }
+                    apkStatus = err ?: ApkInbox.install(context, item.id)
+                }
+            }
+        }
         val list = chats
         when {
             list == null -> Hint("Yükleniyor…")
@@ -168,6 +185,37 @@ private fun ChatList(api: KomutaApi, onOpen: (String) -> Unit, onClose: () -> Un
                 items(list, key = { it.optString("id") }) { ChatRow(it) { onOpen(it.optString("id")) } }
             }
         }
+    }
+}
+
+@Composable
+private fun ApkCard(item: ApkInbox.Item, status: String?, onInstall: () -> Unit) {
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(shape)
+            .background(Color(0x147FB2FF))
+            .border(1.dp, Color(0x407FB2FF), shape)
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("${item.name} · PC'den geldi · ${ago(item.created)}", color = Ink, fontSize = 14.sp, fontWeight = FontWeight.Medium,
+                maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val line = status ?: item.note.ifBlank { "${item.size / (1024 * 1024)} MB" }
+            Text(line, color = Muted, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Spacer(Modifier.width(10.dp))
+        Text(
+            "Yükle", color = CoreColors.Background, fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+            modifier = Modifier
+                .clip(RoundedCornerShape(50))
+                .background(CoreColors.Ice)
+                .clickable(onClick = onInstall)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        )
     }
 }
 
@@ -217,6 +265,7 @@ private fun ChatRow(chat: JSONObject, onClick: () -> Unit) {
 
 @Composable
 private fun ChatView(api: KomutaApi, id: String, onBack: () -> Unit) {
+    val context = LocalContext.current
     var chat by remember { mutableStateOf<JSONObject?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var sending by remember { mutableStateOf(false) }
@@ -243,6 +292,8 @@ private fun ChatView(api: KomutaApi, id: String, onBack: () -> Unit) {
             if (got != null) chat = got
             error = err
             sending = false
+            // Ekran kapansa da bitince bildirim gelsin ve gönderilen APK insin.
+            if (got?.optBoolean("busy") == true) ClaudeWatchWorker.schedule(context)
             tick++
         }
     }

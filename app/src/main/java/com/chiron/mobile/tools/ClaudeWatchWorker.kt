@@ -34,6 +34,8 @@ class ClaudeWatchWorker(appContext: Context, params: WorkerParameters) : Corouti
         val claude = ClaudeJobs(applicationContext, settings)
         val updateBatch = claude.fetchUpdates()
         updateBatch.jobs.forEach { showOnce(claude, it) }
+        // İş sürerken PC bir APK gönderdiyse indirip "Yükle" bildirimi (ApkInbox). Hata worker'ı düşürmez.
+        runCatching { ApkInbox.check(applicationContext) }
 
         val startedAt = inputData.getLong(KEY_STARTED_AT, System.currentTimeMillis())
         if ((updateBatch.active > 0 || !updateBatch.reachable) &&
@@ -57,14 +59,14 @@ class ClaudeWatchWorker(appContext: Context, params: WorkerParameters) : Corouti
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
         if (manager.getNotificationChannel(CHANNEL) == null) {
             manager.createNotificationChannel(
-                NotificationChannel(CHANNEL, "Claude işleri", NotificationManager.IMPORTANCE_HIGH),
+                NotificationChannel(CHANNEL, "PC işleri", NotificationManager.IMPORTANCE_HIGH),
             )
         }
         val status = job.optString("status")
         val title = when (status) {
-            "done" -> "Claude işi bitti"
-            "needs_approval" -> "Claude onay bekliyor"
-            else -> "Claude işi tamamlanamadı"
+            "done" -> "Chiron · iş bitti"
+            "needs_approval" -> "Chiron · onayını bekliyor"
+            else -> "Chiron · iş tamamlanamadı"
         }
         val text = job.optString("approval").ifBlank {
             job.optString("summary").ifBlank { job.optString("error") }

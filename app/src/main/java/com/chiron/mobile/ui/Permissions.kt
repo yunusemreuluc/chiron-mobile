@@ -71,6 +71,12 @@ object Permissions {
             },
         ),
         Special(
+            "Uygulama yükleme",
+            "PC'nin gönderdiği APK'ları (Dilcep güncellemesi gibi) kurabilmek için. İşteyken adb olmadan kurulum bu yoldan.",
+            { it.packageManager.canRequestPackageInstalls() },
+            { Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${it.packageName}")) },
+        ),
+        Special(
             "Xiaomi: arka planda pencere aç",
             "Diğer izinler → 'Arka planda çalışırken yeni pencereler aç'. Kapalıysa Chiron başka uygulamadayken WhatsApp/YouTube açamaz.",
             { MiuiBackgroundStart.granted(it) },

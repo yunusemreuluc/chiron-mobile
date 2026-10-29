@@ -98,6 +98,7 @@ import com.chiron.mobile.service.AssistantService
 import com.chiron.mobile.tools.BackgroundLaunch
 import com.chiron.mobile.tools.ClaudeJobs
 import kotlinx.coroutines.delay
+import com.chiron.mobile.tools.ApkInbox
 import com.chiron.mobile.tools.DesktopBridge
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -112,6 +113,15 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         handleClaudeIntent(intent)
+        handleApkIntent(intent)
+    }
+
+    /** "<uygulama> hazır · Yükle" bildirimi (ApkInbox). */
+    private fun handleApkIntent(intent: Intent?) {
+        if (intent?.action != ApkInbox.ACTION_INSTALL) return
+        val id = intent.getStringExtra(ApkInbox.EXTRA_ID).orEmpty()
+        intent.action = null
+        android.widget.Toast.makeText(this, ApkInbox.install(this, id), android.widget.Toast.LENGTH_SHORT).show()
     }
 
     /** "Claude bitti / onay bekliyor" bildirimi: konuşmayı açıp sonucu okut. */
@@ -131,7 +141,10 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) handleClaudeIntent(intent)
+        if (savedInstanceState == null) {
+            handleClaudeIntent(intent)
+            handleApkIntent(intent)
+        }
         setContent {
             MaterialTheme(colorScheme = darkColorScheme(primary = CoreColors.Ice, background = CoreColors.Background)) {
                 ChironScreen()

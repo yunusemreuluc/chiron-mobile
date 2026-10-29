@@ -72,6 +72,35 @@ class DesktopBridge(private val settings: AppSettings, readTimeoutSeconds: Long 
 
     fun get(path: String): JSONObject = call(path) { it.get() }
 
+    /** Dosya indirir (APK teslimi). Hata mesajı ya da null (başarılı). */
+    fun download(path: String, dest: java.io.File): String? {
+        if (settings.pcUrl.isBlank()) return "PC adresi ayarlanmamış."
+        if (settings.pcSession.isBlank()) return "PC'ye giriş yapılmamış; Chiron ayarlarından PIN gir."
+        return try {
+            val request = Request.Builder()
+                .url(settings.pcUrl + path)
+                .header("Cookie", "chiron_remote=${settings.pcSession}")
+                .get()
+                .build()
+            http.newCall(request).execute().use { response ->
+                if (response.code == 401) {
+                    settings.pcSession = ""
+                    return "PC oturumu sona ermiş; Chiron ayarlarından PIN'i tekrar gir."
+                }
+                if (!response.isSuccessful) return "PC dosyayı vermedi (${response.code})."
+                val body = response.body ?: return "PC boş cevap verdi."
+                dest.outputStream().use { out -> body.byteStream().copyTo(out) }
+            }
+            null
+        } catch (e: IOException) {
+            dest.delete()
+            unreachable()
+        } catch (e: Exception) {
+            dest.delete()
+            "İndirme başarısız: ${e.message}"
+        }
+    }
+
     private fun call(path: String, method: (Request.Builder) -> Request.Builder): JSONObject {
         if (settings.pcUrl.isBlank()) return fail("PC adresi ayarlanmamış.")
         if (settings.pcSession.isBlank()) return fail("PC'ye giriş yapılmamış; Chiron ayarlarından PIN gir.")
