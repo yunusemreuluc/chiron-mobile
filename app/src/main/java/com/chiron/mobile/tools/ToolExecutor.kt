@@ -29,6 +29,8 @@ class ToolExecutor(context: Context, settings: AppSettings) {
     /** Ağ ya da bekleme içerebilir — ana iş parçacığında ÇAĞIRMA. */
     fun execute(name: String, args: JSONObject): JSONObject = run(name, args).also {
         RecentCalls.record(name, args, it)
+        // Yalnız araç adı + sonuç (kişi/mesaj içeriği yazılmaz): "telefondan iş verdim ama olmadı" teşhisi için.
+        Log.i("ChironTools", "$name → ${if (it.optBoolean("success")) "başarılı" else "BAŞARISIZ"}: ${it.optString("message").take(120)}")
         // Sonucu başkasının yazdığı metni taşıyabilen araçlar (bkz. UntrustedInput).
         if (name in UNTRUSTED_RESULTS) UntrustedInput.mark()
     }
