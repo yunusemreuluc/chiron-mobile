@@ -279,7 +279,7 @@ class AssistantService : Service(), GeminiLiveClient.Listener {
             it.playbackMuted = typedMode
         }
         live = GeminiLiveClient(key, this).also {
-            it.connect(MODEL, settings.voice, SystemPrompt.build(settings.carMode), ToolDeclarations.all)
+            it.connect(MODEL, settings.voice, SystemPrompt.build(settings.carMode, settings.assistantName), ToolDeclarations.all)
         }
     }
 

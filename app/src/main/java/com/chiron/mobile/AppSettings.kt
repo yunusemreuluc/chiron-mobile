@@ -33,8 +33,12 @@ class AppSettings(context: Context) {
 
     /** Gemini Live hazır sesi — PC'deki Chiron'la aynı liste (backend/api/settings.py VOICES). */
     var voice: String
-        get() = prefs.getString(KEY_VOICE, null)?.takeIf { v -> VOICES.any { it.id == v } } ?: "Charon"
+        get() = prefs.getString(KEY_VOICE, null)?.takeIf { v -> VOICES.any { it.id == v } } ?: "Algieba"
         set(value) = prefs.edit().putString(KEY_VOICE, value).apply()
+
+    /** Seçili sesin asistan adı — PC'deki app_config.assistant_name ile aynı kural. */
+    val assistantName: String
+        get() = if (voice in FEMALE_VOICES) "Daphne" else "Chiron"
 
     /** Chiron'un konuşma sesi, telefonun ses düzeyine göre 0..1 kısma. */
     var voiceVolume: Float
@@ -87,16 +91,13 @@ class AppSettings(context: Context) {
     companion object {
         /** Google'ın ses karakteri tanımlarının Türkçesi. */
         val VOICES = listOf(
-            Voice("Charon", "Erkek · bilgilendirici (varsayılan)"),
-            Voice("Puck", "Erkek · neşeli, enerjik"),
-            Voice("Fenrir", "Erkek · heyecanlı"),
-            Voice("Orus", "Erkek · kararlı, tok"),
-            Voice("Sadaltager", "Erkek · bilgili, sakin"),
-            Voice("Aoede", "Kadın · ferah, rahat"),
-            Voice("Kore", "Kadın · kararlı"),
-            Voice("Leda", "Kadın · genç"),
-            Voice("Zephyr", "Kadın · parlak, canlı"),
+            Voice("Algieba", "Chiron · erkek, akıcı (varsayılan)"),
+            Voice("Achernar", "Daphne · kadın, yumuşak"),
+            Voice("Iapetus", "Chiron · erkek, net (yedek)"),
+            Voice("Despina", "Daphne · kadın, akıcı (yedek)"),
         )
+
+        val FEMALE_VOICES = setOf("Achernar", "Despina")
 
         private const val KEY_GEMINI = "gemini_key"
         private const val KEY_PC_URL = "pc_url"

@@ -73,9 +73,17 @@ Yanıt Kuralı: Fonksiyon çağrısından dönen JSON verisini tek bir akıcı v
 - Kullanıcı büyük ihtimalle araba kullanıyor: cevapları kısa tut, liste okuma, ekrana bakmasını gerektiren bir şey isteme.
 """.trim()
 
-    fun build(carMode: Boolean = false): String {
+    /** PC'deki app_config.SPEAKING_STYLE ile aynı metinler. */
+    private val SPEAKING_STYLE = mapOf(
+        "Chiron" to "Sakin, ağırbaşlı ve kendinden emin konuş; kibar ama yaltaklanmadan, yerinde kuru bir espriyle. Acele etme, cümleleri net bitir.",
+        "Daphne" to "Yumuşak, sıcak ve yavaş konuş; samimi, hafif oyuncu ve içten bir tonla. Cümleleri acele etmeden, yumuşak bitir.",
+    )
+
+    fun build(carMode: Boolean = false, name: String = "Chiron"): String {
         val now = SimpleDateFormat("d MMMM yyyy EEEE, HH:mm", Locale("tr")).format(Date())
         val car = if (carMode) "\n\n$CAR_NOTES" else ""
-        return "[ŞU ANKİ ZAMAN]\n$now\n\n$USER_PROMPT\n\n$OPERATING_NOTES$car"
+        val prompt = if (name == "Daphne") USER_PROMPT.replace("asistanısın (Chiron)", "asistanısın (Daphne)") else USER_PROMPT
+        val style = "[KONUŞMA TARZI]\n- ${SPEAKING_STYLE.getValue(name)}"
+        return "[ŞU ANKİ ZAMAN]\n$now\n\n$prompt\n\n$style\n\n$OPERATING_NOTES$car"
     }
 }
